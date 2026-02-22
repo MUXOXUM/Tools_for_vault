@@ -33,6 +33,7 @@ const filterBar = document.getElementById("filter-bar");
 const app = document.querySelector(".app");
 const timelineScroll = document.getElementById("timeline-scroll");
 const timeline = document.getElementById("timeline");
+const mediaTitle = document.getElementById("media-title");
 const mediaGrid = document.getElementById("media-grid");
 const viewer = document.getElementById("viewer");
 const viewerClose = document.getElementById("viewer-close");
@@ -305,6 +306,7 @@ function resetState() {
   state.filteredEvents = [];
   state.selectedEventId = null;
   state.viewerItems = [];
+  setMediaTitle("");
   closeViewer();
 }
 
@@ -323,6 +325,7 @@ function applyFilters() {
 
   if (!state.filteredEvents.some((e) => e.id === state.selectedEventId)) {
     state.selectedEventId = null;
+    setMediaTitle("");
     renderMedia([]);
   }
 
@@ -516,9 +519,12 @@ async function onSelectEvent(eventId) {
 
   const event = state.filteredEvents.find((e) => e.id === eventId);
   if (!event) {
+    setMediaTitle("");
     renderMedia([]);
     return;
   }
+
+  setMediaTitle(event.folderName);
 
   if (state.sourceType === "handle") {
     const files = await readEventFilesFromHandle(event.folderHandle);
@@ -553,6 +559,10 @@ function mediaType(fileName) {
 function clearMediaUrls() {
   for (const u of state.mediaUrls) URL.revokeObjectURL(u);
   state.mediaUrls = [];
+}
+
+function setMediaTitle(value) {
+  mediaTitle.textContent = value;
 }
 
 function renderMedia(files) {

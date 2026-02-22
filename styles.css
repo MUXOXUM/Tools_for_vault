@@ -33,6 +33,20 @@ body {
   padding: 14px;
 }
 
+.app:not(.loaded) {
+  grid-template-rows: auto auto;
+  align-content: center;
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+.app:not(.loaded) .title,
+.app:not(.loaded) .filter-bar,
+.app:not(.loaded) .timeline-shell,
+.app:not(.loaded) .media-panel {
+  display: none;
+}
+
 .topbar {
   display: flex;
   justify-content: space-between;
@@ -204,6 +218,15 @@ body {
 
 .media-panel {
   padding: 12px;
+}
+
+.media-title {
+  min-height: 20px;
+  margin: 0 0 10px;
+  color: #d3dbe7;
+  font-size: 13px;
+  line-height: 1.3;
+  word-break: break-word;
 }
 
 .media-grid {

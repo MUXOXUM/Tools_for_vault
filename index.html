@@ -9,7 +9,6 @@
   <body>
     <main class="app">
       <header class="topbar">
-        <h1 class="title">Timeline Viewer</h1>
         <div class="actions">
           <button id="pick-folder" class="btn" type="button">Выбрать папку</button>
           <input id="folder-input" type="file" webkitdirectory directory multiple hidden />
@@ -29,6 +28,7 @@
       </section>
 
       <section id="media-panel" class="media-panel" aria-label="Media viewer">
+        <div id="media-title" class="media-title"></div>
         <div id="media-grid" class="media-grid"></div>
       </section>
     </main>
