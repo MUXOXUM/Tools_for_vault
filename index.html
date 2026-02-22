@@ -9,6 +9,13 @@
   <body>
     <main class="app">
       <header class="topbar">
+        <div class="onboarding-intro" aria-live="polite">
+          <p class="eyebrow">Timeline Viewer</p>
+          <h1 class="title">Загрузите папку с событиями</h1>
+          <p class="subtitle">
+            Поддерживается выбор папки, drag-and-drop и быстрый просмотр фото/видео по таймлайну.
+          </p>
+        </div>
         <div class="actions">
           <button id="pick-folder" class="btn" type="button">Выбрать папку</button>
           <input id="folder-input" type="file" webkitdirectory directory multiple hidden />
@@ -16,7 +23,10 @@
       </header>
 
       <section id="drop-zone" class="drop-zone" aria-label="Drop folder">
-        <span>Drag & Drop</span>
+        <div class="drop-content">
+          <strong>Перетащите папку сюда</strong>
+          <span>или выберите через кнопку выше</span>
+        </div>
       </section>
 
       <section id="filter-bar" class="filter-bar" aria-label="Tag filters"></section>
@@ -26,6 +36,13 @@
           <div id="timeline" class="timeline"></div>
         </div>
       </section>
+      <div
+        id="panel-splitter"
+        class="panel-splitter"
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Resize panels"
+      ></div>
 
       <section id="media-panel" class="media-panel" aria-label="Media viewer">
         <div id="media-title" class="media-title"></div>

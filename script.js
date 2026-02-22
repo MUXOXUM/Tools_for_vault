@@ -22,6 +22,7 @@ const state = {
   maxZoom: 3.2,
   dayWidthBase: 0.45,
   mediaUrls: [],
+  mediaRenderToken: 0,
   viewerItems: [],
   viewerIndex: 0,
 };
@@ -31,15 +32,28 @@ const folderInput = document.getElementById("folder-input");
 const dropZone = document.getElementById("drop-zone");
 const filterBar = document.getElementById("filter-bar");
 const app = document.querySelector(".app");
+const timelineShell = document.querySelector(".timeline-shell");
 const timelineScroll = document.getElementById("timeline-scroll");
 const timeline = document.getElementById("timeline");
+const panelSplitter = document.getElementById("panel-splitter");
 const mediaTitle = document.getElementById("media-title");
 const mediaGrid = document.getElementById("media-grid");
+const mediaPanel = document.getElementById("media-panel");
 const viewer = document.getElementById("viewer");
 const viewerClose = document.getElementById("viewer-close");
 const viewerPrev = document.getElementById("viewer-prev");
 const viewerNext = document.getElementById("viewer-next");
 const viewerStage = document.getElementById("viewer-stage");
+let mediaLazyObserver = null;
+const panelResizeState = {
+  active: false,
+  pointerId: null,
+  startY: 0,
+  startTimelineHeight: 0,
+  totalFlexibleHeight: 0,
+};
+const MIN_TIMELINE_HEIGHT = 180;
+const MIN_MEDIA_HEIGHT = 180;
 
 pickButton.addEventListener("click", chooseFolder);
 folderInput.addEventListener("change", () => {
@@ -116,9 +130,61 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "ArrowRight") shiftViewer(1);
   if (event.key === "ArrowLeft") shiftViewer(-1);
 });
+setupPanelResize();
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function setupPanelResize() {
+  if (!panelSplitter || !timelineShell || !mediaPanel) return;
+
+  panelSplitter.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || !app.classList.contains("loaded")) return;
+
+    const timelineRect = timelineShell.getBoundingClientRect();
+    const mediaRect = mediaPanel.getBoundingClientRect();
+    panelResizeState.active = true;
+    panelResizeState.pointerId = event.pointerId;
+    panelResizeState.startY = event.clientY;
+    panelResizeState.startTimelineHeight = timelineRect.height;
+    panelResizeState.totalFlexibleHeight = timelineRect.height + mediaRect.height;
+
+    panelSplitter.classList.add("active");
+    document.body.classList.add("resizing-panels");
+    panelSplitter.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  });
+
+  panelSplitter.addEventListener("pointermove", (event) => {
+    if (!panelResizeState.active || event.pointerId !== panelResizeState.pointerId) return;
+
+    const deltaY = event.clientY - panelResizeState.startY;
+    const minTimeline = MIN_TIMELINE_HEIGHT;
+    const maxTimeline = Math.max(minTimeline, panelResizeState.totalFlexibleHeight - MIN_MEDIA_HEIGHT);
+    const nextTimeline = clamp(panelResizeState.startTimelineHeight + deltaY, minTimeline, maxTimeline);
+
+    app.style.setProperty("--timeline-size", `${Math.round(nextTimeline)}px`);
+  });
+
+  const stopResize = (event) => {
+    if (!panelResizeState.active) return;
+    if (event && panelResizeState.pointerId !== null && event.pointerId !== panelResizeState.pointerId) return;
+
+    try {
+      if (panelResizeState.pointerId !== null) {
+        panelSplitter.releasePointerCapture(panelResizeState.pointerId);
+      }
+    } catch (_) {}
+
+    panelResizeState.active = false;
+    panelResizeState.pointerId = null;
+    panelSplitter.classList.remove("active");
+    document.body.classList.remove("resizing-panels");
+  };
+
+  panelSplitter.addEventListener("pointerup", stopResize);
+  panelSplitter.addEventListener("pointercancel", stopResize);
 }
 
 function parseFolderName(name) {
@@ -295,7 +361,9 @@ function applyLoadedEvents(events) {
 }
 
 function resetState() {
+  state.mediaRenderToken += 1;
   clearMediaUrls();
+  disconnectMediaObserver();
   state.rootHandle = null;
   state.fallbackByFolder = new Map();
   state.events = [];
@@ -561,12 +629,47 @@ function clearMediaUrls() {
   state.mediaUrls = [];
 }
 
+function disconnectMediaObserver() {
+  if (!mediaLazyObserver) return;
+  mediaLazyObserver.disconnect();
+  mediaLazyObserver = null;
+}
+
+function ensureMediaObserver() {
+  if (mediaLazyObserver) return mediaLazyObserver;
+  mediaLazyObserver = new IntersectionObserver(
+    (entries, observer) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const node = entry.target;
+        const src = node.dataset.src;
+        if (!src) {
+          observer.unobserve(node);
+          continue;
+        }
+        node.src = src;
+        delete node.dataset.src;
+        if (node.tagName === "VIDEO") node.load();
+        observer.unobserve(node);
+      }
+    },
+    {
+      root: mediaGrid,
+      rootMargin: "320px 0px",
+      threshold: 0.01,
+    }
+  );
+  return mediaLazyObserver;
+}
+
 function setMediaTitle(value) {
   mediaTitle.textContent = value;
 }
 
 function renderMedia(files) {
+  const renderToken = ++state.mediaRenderToken;
   clearMediaUrls();
+  disconnectMediaObserver();
   mediaGrid.innerHTML = "";
   state.viewerItems = [];
   state.viewerIndex = 0;
@@ -578,31 +681,53 @@ function renderMedia(files) {
 
   mediaFiles.sort((a, b) => a.name.localeCompare(b.name));
 
-  mediaFiles.forEach((file, index) => {
-    const type = mediaType(file.name);
-    const url = URL.createObjectURL(file);
-    state.mediaUrls.push(url);
-    state.viewerItems.push({ type, url });
+  const observer = ensureMediaObserver();
+  const chunkSize = 60;
+  let index = 0;
 
-    let node;
-    if (type === "image") {
-      node = document.createElement("img");
-      node.src = url;
-      node.loading = "lazy";
-      node.className = "media-thumb";
-      node.alt = file.name;
-    } else {
-      node = document.createElement("video");
-      node.src = url;
-      node.className = "media-thumb video";
-      node.preload = "metadata";
-      node.muted = true;
-      node.playsInline = true;
+  const renderChunk = () => {
+    if (renderToken !== state.mediaRenderToken) return;
+    const fragment = document.createDocumentFragment();
+    const end = Math.min(index + chunkSize, mediaFiles.length);
+
+    for (; index < end; index += 1) {
+      const currentIndex = index;
+      const file = mediaFiles[index];
+      const type = mediaType(file.name);
+      const url = URL.createObjectURL(file);
+      state.mediaUrls.push(url);
+      state.viewerItems.push({ type, url });
+
+      let node;
+      if (type === "image") {
+        node = document.createElement("img");
+        node.loading = "lazy";
+        node.decoding = "async";
+        node.fetchPriority = "low";
+        node.className = "media-thumb";
+        node.alt = file.name;
+      } else {
+        node = document.createElement("video");
+        node.className = "media-thumb video";
+        node.preload = "none";
+        node.muted = true;
+        node.playsInline = true;
+      }
+
+      node.dataset.src = url;
+      node.addEventListener("click", () => openViewer(currentIndex));
+      observer.observe(node);
+      fragment.appendChild(node);
     }
 
-    node.addEventListener("click", () => openViewer(index));
-    mediaGrid.appendChild(node);
-  });
+    mediaGrid.appendChild(fragment);
+
+    if (index < mediaFiles.length) {
+      requestAnimationFrame(renderChunk);
+    }
+  };
+
+  requestAnimationFrame(renderChunk);
 }
 
 function openViewer(index) {
