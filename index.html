@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Timeline Viewer</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="topbar">
+        <h1 class="title">Timeline Viewer</h1>
+        <div class="actions">
+          <button id="pick-folder" class="btn" type="button">Выбрать папку</button>
+          <input id="folder-input" type="file" webkitdirectory directory multiple hidden />
+        </div>
+      </header>
+
+      <section id="drop-zone" class="drop-zone" aria-label="Drop folder">
+        <span>Drag & Drop</span>
+      </section>
+
+      <section id="filter-bar" class="filter-bar" aria-label="Tag filters"></section>
+
+      <section class="timeline-shell" aria-label="Timeline">
+        <div id="timeline-scroll" class="timeline-scroll">
+          <div id="timeline" class="timeline"></div>
+        </div>
+      </section>
+
+      <section id="media-panel" class="media-panel" aria-label="Media viewer">
+        <div id="media-grid" class="media-grid"></div>
+      </section>
+    </main>
+
+    <div id="viewer" class="viewer hidden" role="dialog" aria-modal="true">
+      <button id="viewer-close" class="viewer-close" type="button" aria-label="Close">×</button>
+      <button id="viewer-prev" class="viewer-nav prev" type="button" aria-label="Previous">‹</button>
+      <div id="viewer-stage" class="viewer-stage"></div>
+      <button id="viewer-next" class="viewer-nav next" type="button" aria-label="Next">›</button>
+    </div>
+
+    <script src="script.js"></script>
+  </body>
+</html>
