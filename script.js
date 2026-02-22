@@ -1,6 +1,7 @@
 const START_YEAR = 2005;
 const START_DATE = new Date(`${START_YEAR}-01-01T00:00:00Z`);
 const DAY_MS = 24 * 60 * 60 * 1000;
+const MONTH_LABEL_MIN_PX_PER_DAY = 0.42;
 const DATE_BLOCK_RE = /^\d{4}-\d{2}-\d{2}(?:[\/\u2044]\d{4}-\d{2}-\d{2})?$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const IMAGE_EXT = new Set(["jpg", "jpeg", "png", "webp"]);
@@ -99,20 +100,28 @@ timelineScroll.addEventListener(
     if (!state.filteredEvents.length) return;
 
     event.preventDefault();
-    const prevScale = state.dayWidthBase * state.zoom;
-    const rect = timelineScroll.getBoundingClientRect();
-    const cursorX = event.clientX - rect.left;
-    const scrollLeft = timelineScroll.scrollLeft;
-    const dayAtCursor = (scrollLeft + cursorX) / prevScale;
+    if (event.ctrlKey) {
+      const prevScale = state.dayWidthBase * state.zoom;
+      const rect = timelineScroll.getBoundingClientRect();
+      const cursorX = event.clientX - rect.left;
+      const scrollLeft = timelineScroll.scrollLeft;
+      const dayAtCursor = (scrollLeft + cursorX) / prevScale;
 
-    const zoomStep = event.deltaY < 0 ? 1.12 : 1 / 1.12;
-    state.zoom = clamp(state.zoom * zoomStep, state.minZoom, state.maxZoom);
+      const zoomStep = event.deltaY < 0 ? 1.12 : 1 / 1.12;
+      state.zoom = clamp(state.zoom * zoomStep, state.minZoom, state.maxZoom);
 
-    renderTimeline();
+      renderTimeline();
 
-    const nextScale = state.dayWidthBase * state.zoom;
-    const nextScroll = dayAtCursor * nextScale - cursorX;
-    timelineScroll.scrollLeft = Math.max(0, nextScroll);
+      const nextScale = state.dayWidthBase * state.zoom;
+      const nextScroll = dayAtCursor * nextScale - cursorX;
+      timelineScroll.scrollLeft = Math.max(0, nextScroll);
+      return;
+    }
+
+    let delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+    if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) delta *= 16;
+    if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) delta *= timelineScroll.clientWidth;
+    timelineScroll.scrollLeft += delta;
   },
   { passive: false }
 );
@@ -540,7 +549,7 @@ function renderTimeline() {
     yearRow.appendChild(label);
   }
 
-  const showMonths = pxPerDay > 0.23;
+  const showMonths = pxPerDay > MONTH_LABEL_MIN_PX_PER_DAY;
   if (showMonths) {
     for (const m of monthStartDays(fromDate, toDate)) {
       const day = daysFromStart(m);
