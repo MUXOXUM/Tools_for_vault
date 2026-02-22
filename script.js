@@ -756,6 +756,7 @@ function renderViewerSlide() {
 
   if (item.type === "image") {
     const img = document.createElement("img");
+    img.className = "viewer-media";
     img.src = item.url;
     img.alt = "";
     viewerStage.appendChild(img);
@@ -763,6 +764,7 @@ function renderViewerSlide() {
   }
 
   const video = document.createElement("video");
+  video.className = "viewer-media";
   video.src = item.url;
   video.controls = true;
   video.autoplay = true;
