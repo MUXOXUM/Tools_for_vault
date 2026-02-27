@@ -24,7 +24,7 @@ MAIN_PID="$BASHPID"
 SHUTTING_DOWN=0
 
 # --- Расширения медиафайлов ---
-IMAGE_EXTENSIONS="jpg jpeg png gif bmp tiff tif webp heic heif avif"
+IMAGE_EXTENSIONS="jpg jpeg png gif bmp tiff tif webp heic heif avif cr2"
 VIDEO_EXTENSIONS="mp4 mkv avi mov wmv flv m4v mpg mpeg webm 3gp 3g2 ogv"
 
 # --- Обработка сигналов ---
@@ -70,6 +70,13 @@ init_logging() {
     log_msg "INFO" "Скрипт запущен. PID=$$"
     log_msg "INFO" "Текущая директория: $(pwd)"
     return 0
+}
+
+ensure_logging() {
+    if [ -n "$LOG_FILE" ]; then
+        return 0
+    fi
+    init_logging
 }
 
 log_msg() {
@@ -561,8 +568,14 @@ mode_exif_body() {
             if [ -n "$datetime" ]; then
                 # Формируем новое имя
                 if [ -n "$subsec" ] && [ ${#subsec} -gt 0 ]; then
-                    ms=$(echo "$subsec" | cut -c1-3 | sed 's/^0*//')
-                    new_name="${datetime}_${ms}.${file_ext}"
+                    # Оставляем только цифры, берём миллисекунды и убираем ведущие нули.
+                    # Если после этого пусто (например, было 000), суффикс не добавляем.
+                    ms=$(printf '%s' "$subsec" | tr -cd '0-9' | cut -c1-3 | sed 's/^0*//')
+                    if [ -n "$ms" ]; then
+                        new_name="${datetime}_${ms}.${file_ext}"
+                    else
+                        new_name="${datetime}.${file_ext}"
+                    fi
                 else
                     new_name="${datetime}.${file_ext}"
                 fi
@@ -599,6 +612,13 @@ mode_exif_body() {
 }
 
 mode_exif() {
+    if ! ensure_logging; then
+        printf "${RED}Ошибка: не удалось инициализировать логирование.${NC}\n"
+        printf "\n${PURPLE}Нажмите Enter для возврата в меню...${NC}"
+        read -r dummy
+        return
+    fi
+
     if ! confirm_mode \
         "РЕЖИМ 1: Переименование по EXIF" \
         "Как работает режим:
@@ -725,6 +745,13 @@ mode_name_patterns_body() {
 }
 
 mode_name_patterns() {
+    if ! ensure_logging; then
+        printf "${RED}Ошибка: не удалось инициализировать логирование.${NC}\n"
+        printf "\n${PURPLE}Нажмите Enter для возврата в меню...${NC}"
+        read -r dummy
+        return
+    fi
+
     if ! confirm_mode \
         "РЕЖИМ 2: Переименование по шаблонам имен" \
         "Как работает режим:
@@ -900,6 +927,13 @@ mode_metadata_body() {
 }
 
 mode_metadata() {
+    if ! ensure_logging; then
+        printf "${RED}Ошибка: не удалось инициализировать логирование.${NC}\n"
+        printf "\n${PURPLE}Нажмите Enter для возврата в меню...${NC}"
+        read -r dummy
+        return
+    fi
+
     if ! confirm_mode \
         "РЕЖИМ 3: Переименование по метаданным файла" \
         "Как работает режим:
@@ -942,6 +976,7 @@ mode_metadata() {
 
 # --- Главное меню ---
 show_menu() {
+    log_display="${LOG_FILE:-не создан (будет создан при запуске пункта 1-3)}"
     clear_screen
     printf "${PURPLE}========================================${NC}\n"
     printf "${PURPLE}        MEDIA RENAMER UTILITY${NC}\n"
@@ -950,17 +985,13 @@ show_menu() {
     printf "${BLUE}2 - Переименование по шаблонам имен${NC}\n"
     printf "${BLUE}3 - Переименование по метаданным файла${NC}\n"
     printf "${RED}0 - Выход${NC}\n"
-    printf "${YELLOW}Лог: %s${NC}\n" "$LOG_FILE"
+    printf "${YELLOW}Лог: %s${NC}\n" "$log_display"
     printf "${PURPLE}========================================${NC}\n"
     printf "Выберите пункт: "
 }
 
 # --- Основной цикл программы ---
 main() {
-    if ! init_logging; then
-        exit 1
-    fi
-
     while true; do
         show_menu
         read -r choice
