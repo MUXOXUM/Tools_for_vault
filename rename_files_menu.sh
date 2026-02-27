@@ -1,9 +1,9 @@
-#!/bin/sh
+#!/usr/bin/env bash
 
 # ===============================================
 # media_renamer.sh - Утилита для массового переименования медиафайлов
 # Версия: 1.5
-# Описание: POSIX-совместимый скрипт с меню для рекурсивного переименования
+# Описание: Скрипт с меню для рекурсивного переименования
 # ===============================================
 
 # --- Конфигурация цветов ---
@@ -16,6 +16,7 @@ NC='\033[0m' # No Color
 
 # --- Глобальные переменные ---
 SCRIPT_NAME="$(basename "$0")"
+LOG_FILE=""
 
 # --- Расширения медиафайлов ---
 IMAGE_EXTENSIONS="jpg jpeg png gif bmp tiff tif webp heic heif avif"
@@ -24,6 +25,7 @@ VIDEO_EXTENSIONS="mp4 mkv avi mov wmv flv m4v mpg mpeg webm 3gp 3g2 ogv"
 # --- Обработка сигналов ---
 cleanup() {
     printf "\n${YELLOW}Получен сигнал завершения. Выход...${NC}\n"
+    log_msg "INFO" "Получен сигнал завершения, выход."
     exit 0
 }
 trap cleanup INT TERM
@@ -31,6 +33,58 @@ trap cleanup INT TERM
 # --- Очистка экрана ---
 clear_screen() {
     printf "\033[2J\033[H"
+}
+
+# --- Логирование ---
+init_logging() {
+    ts=$(date +"%Y%m%d_%H%M%S")
+    LOG_FILE="./media_renamer_${ts}.log"
+
+    if ! : > "$LOG_FILE"; then
+        printf "${RED}Ошибка: не удалось создать лог-файл: %s${NC}\n" "$LOG_FILE"
+        return 1
+    fi
+
+    log_msg "INFO" "Скрипт запущен. PID=$$"
+    log_msg "INFO" "Текущая директория: $(pwd)"
+    return 0
+}
+
+log_msg() {
+    level="$1"
+    shift
+    message="$*"
+    now=$(date +"%Y-%m-%d %H:%M:%S")
+
+    if [ -n "$LOG_FILE" ]; then
+        printf '[%s] [%s] %s\n' "$now" "$level" "$message" >> "$LOG_FILE"
+    fi
+}
+
+# --- Подтверждение запуска режима ---
+confirm_mode() {
+    mode_title="$1"
+    mode_description="$2"
+
+    clear_screen
+    printf "${PURPLE}=== %s ===${NC}\n\n" "$mode_title"
+    printf "%s\n\n" "$mode_description"
+    printf "${YELLOW}Продолжить? [Y/n]: ${NC}"
+    read -r answer
+
+    case "$answer" in
+        ""|Y|y|yes|YES)
+            log_msg "INFO" "Подтвержден запуск режима: $mode_title"
+            return 0
+            ;;
+        *)
+            log_msg "INFO" "Отменен запуск режима: $mode_title"
+            printf "\n${YELLOW}Операция отменена.${NC}\n"
+            printf "\n${PURPLE}Нажмите Enter для возврата в меню...${NC}"
+            read -r dummy
+            return 1
+            ;;
+    esac
 }
 
 # --- Проверка наличия утилиты ---
@@ -72,14 +126,17 @@ safe_rename() {
 
     # Если исходный и целевой файлы совпадают - пропускаем
     if [ "$src" = "$dst" ]; then
+        log_msg "INFO" "Пропуск переименования (имя не изменилось): '$src'"
         return 2
     fi
 
     # Проверяем существование целевого файла
     if [ ! -e "$dst" ]; then
         if mv "$src" "$dst" 2>/dev/null; then
+            log_msg "INFO" "Переименован: '$src' -> '$dst'"
             return 0
         else
+            log_msg "ERROR" "Ошибка mv: '$src' -> '$dst'"
             return 1
         fi
     fi
@@ -110,8 +167,10 @@ safe_rename() {
             new_dst="${dir}/${base_without_ms}_${new_ms}_${counter}${ext}"
             if mv "$src" "$new_dst" 2>/dev/null; then
                 printf "${BLUE}Файл существовал, переименован в: %s (добавлен счетчик %d)${NC}\n" "$(basename "$new_dst")" "$counter"
+                log_msg "INFO" "Коллизия имени, переименован: '$src' -> '$new_dst'"
                 return 0
             else
+                log_msg "ERROR" "Ошибка mv при коллизии: '$src' -> '$new_dst'"
                 return 1
             fi
         fi
@@ -133,8 +192,10 @@ safe_rename() {
 
     if mv "$src" "$new_dst" 2>/dev/null; then
         printf "${BLUE}Файл существовал, переименован в: %s${NC}\n" "$(basename "$new_dst")"
+        log_msg "INFO" "Коллизия имени, переименован: '$src' -> '$new_dst'"
         return 0
     else
+        log_msg "ERROR" "Ошибка mv при коллизии: '$src' -> '$new_dst'"
         return 1
     fi
 }
@@ -399,8 +460,19 @@ should_skip_for_metadata() {
 
 # --- Пункт 1: Переименование по EXIF ---
 mode_exif() {
+    if ! confirm_mode \
+        "РЕЖИМ 1: Переименование по EXIF" \
+        "Как работает режим:
+- Обрабатывает только фотофайлы с EXIF-датой.
+- Переименовывает в формат: YYYY-MM-DD_HH:MM:SS.ext
+- Если есть SubSec, добавляет миллисекунды: YYYY-MM-DD_HH:MM:SS_123.ext
+- При конфликте имен использует безопасное авто-добавление суффикса."; then
+        return
+    fi
+
     clear_screen
     printf "${PURPLE}=== РЕЖИМ 1: Переименование по EXIF ===${NC}\n\n"
+    log_msg "INFO" "Запуск режима 1 (EXIF)"
 
     # Проверка наличия exiftool
     if ! check_dependency "exiftool"; then
@@ -409,7 +481,7 @@ mode_exif() {
         printf "${BLUE}  или${NC}\n"
         printf "${BLUE}  sudo yum install exiftool${NC}\n"
         printf "\n${PURPLE}Нажмите Enter для возврата в меню...${NC}"
-        read dummy
+        read -r dummy
         return
     fi
 
@@ -456,22 +528,22 @@ mode_exif() {
                 new_path="$dir/$new_name"
 
                 # Переименовываем с использованием улучшенной safe_rename
-                if safe_rename "$file" "$new_path" "$filename"; then
-                    case $? in
-                        0)
-                            printf "${GREEN}  ✓ %s -> %s${NC}\n" "$filename" "$(basename "$new_path")"
-                            r=$((r + 1))
-                            ;;
-                        1)
-                            printf "${RED}  ✗ Ошибка переименования: %s${NC}\n" "$filename"
-                            e=$((e + 1))
-                            ;;
-                        2)
-                            # Уже имеет правильное имя - не выводим
-                            s=$((s + 1))
-                            ;;
-                    esac
-                fi
+                safe_rename "$file" "$new_path" "$filename"
+                rc=$?
+                case "$rc" in
+                    0)
+                        printf "${GREEN}  ✓ %s -> %s${NC}\n" "$filename" "$(basename "$new_path")"
+                        r=$((r + 1))
+                        ;;
+                    1)
+                        printf "${RED}  ✗ Ошибка переименования: %s${NC}\n" "$filename"
+                        e=$((e + 1))
+                        ;;
+                    2)
+                        # Уже имеет правильное имя - не выводим
+                        s=$((s + 1))
+                        ;;
+                esac
             else
                 # Нет EXIF данных - пропускаем без вывода
                 s=$((s + 1))
@@ -492,96 +564,43 @@ mode_exif() {
     printf "${GREEN}Переименовано: %d${NC}\n" "$renamed"
     printf "${YELLOW}Пропущено: %d${NC}\n" "$skipped"
     printf "${RED}Ошибок: %d${NC}\n" "$errors"
+    log_msg "INFO" "Итог режима 1: processed=$processed renamed=$renamed skipped=$skipped errors=$errors"
 
     printf "\n${PURPLE}Нажмите Enter для возврата в меню...${NC}"
-    read dummy
+    read -r dummy
 }
 
-# --- Пункт 2: Переименование скриншотов ---
-mode_screenshots() {
+# --- Пункт 2: Переименование по шаблонам имен (скриншоты + IMG/VID/photo/video) ---
+mode_name_patterns() {
+    if ! confirm_mode \
+        "РЕЖИМ 2: Переименование по шаблонам имен" \
+        "Как работает режим:
+- Обрабатывает только фото и видео.
+- Переименовывает ТОЛЬКО файлы с именами в одном из форматов:
+  1) Снимок экрана YYYY-MM-DD HHMMSS
+  2) Снимок экрана_YYYYMMDD_HHMMSS
+  3) Снимок экрана YYYY-MM-DD HH-MM-SS
+  4) YYYY-MM-DD_HH.MM.SS
+  5) Capture YYYY-MM-DD HH_MM_SS
+  6) Capture_YYYY-MM-DD_HH_MM_SS
+  7) ScreenshotYYYYMMDD-HHMMSSxxx
+  8) Screenshot YYYYMMDD HHMMSS
+  9) Screenshot_YYYYMMDD_HHMMSS
+  10) IMG_YYYYMMDD_HHMMSS / VID_YYYYMMDD_HHMMSS
+  11) IMG_YYYYMMDD_HHMMSS_999 / VID_YYYYMMDD_HHMMSS_999
+  12) IMG_YYYYMMDD_HH-MM-SS / VID_YYYYMMDD_HH-MM-SS
+  13) IMG_YYYY-MM-DD_HH-MM-SS / VID_YYYY-MM-DD_HH-MM-SS
+  14) photo_YYYY-MM-DD_HH-MM-SS / video_YYYY-MM-DD_HH-MM-SS
+  15) Photo_YYYY-MM-DD-HHMMSS / Video_YYYY-MM-DD-HHMMSS
+- Переименовывает в единый формат: YYYY-MM-DD_HH:MM:SS.ext
+- Если в исходном имени есть миллисекунды, сохраняет их: ..._123.ext
+- При конфликте имен использует безопасное авто-добавление суффикса."; then
+        return
+    fi
+
     clear_screen
-    printf "${PURPLE}=== РЕЖИМ 2: Переименование скриншотов ===${NC}\n\n"
-
-    processed=0
-    renamed=0
-    skipped=0
-    errors=0
-
-    stats_file=$(mktemp)
-    echo "0 0 0 0" > "$stats_file"
-
-    find . -type f -print0 | while IFS= read -r -d '' file; do
-        # Проверяем, является ли файл медиафайлом
-        if ! is_media_file "$file"; then
-            continue
-        fi
-
-        read p r s e < "$stats_file"
-        p=$((p + 1))
-
-        datetime=$(extract_datetime_from_name "$file")
-
-        if [ -n "$datetime" ]; then
-            dir=$(dirname "$file")
-            ext=$(basename "$file" | sed 's/.*\.//')
-            filename=$(basename "$file")
-
-            # Проверяем наличие миллисекунд в исходном имени
-            if echo "$filename" | grep -qE '_[0-9]{1,3}\.'; then
-                ms=$(echo "$filename" | sed -n 's/.*_\([0-9]\{1,3\}\)\..*$/\1/p')
-                new_name="${datetime}_${ms}.${ext}"
-            else
-                new_name="${datetime}.${ext}"
-            fi
-
-            new_path="$dir/$new_name"
-
-            printf "${BLUE}[%d] Обработка: %s${NC}\n" "$p" "$filename"
-
-            if [ "$file" = "$new_path" ]; then
-                printf "${YELLOW}  - Уже имеет правильный формат${NC}\n"
-                s=$((s + 1))
-            else
-                # Используем улучшенную safe_rename
-                if safe_rename "$file" "$new_path" "$filename"; then
-                    case $? in
-                        0)
-                            printf "${GREEN}  ✓ Переименован в: %s${NC}\n" "$(basename "$new_path")"
-                            r=$((r + 1))
-                            ;;
-                        1)
-                            printf "${RED}  ✗ Ошибка переименования${NC}\n"
-                            e=$((e + 1))
-                            ;;
-                        2)
-                            printf "${YELLOW}  - Уже имеет правильный формат${NC}\n"
-                            s=$((s + 1))
-                            ;;
-                    esac
-                fi
-            fi
-        fi
-
-        echo "$p $r $s $e" > "$stats_file"
-    done
-
-    read processed renamed skipped errors < "$stats_file"
-    rm -f "$stats_file"
-
-    printf "\n${PURPLE}=== ИТОГ РЕЖИМА 2 ===${NC}\n"
-    printf "${BLUE}Обработано: %d${NC}\n" "$processed"
-    printf "${GREEN}Переименовано: %d${NC}\n" "$renamed"
-    printf "${YELLOW}Пропущено: %d${NC}\n" "$skipped"
-    printf "${RED}Ошибок: %d${NC}\n" "$errors"
-
-    printf "\n${PURPLE}Нажмите Enter для возврата в меню...${NC}"
-    read dummy
-}
-
-# --- Пункт 3: Унификация IMG/VID/photo/video ---
-mode_unify() {
-    clear_screen
-    printf "${PURPLE}=== РЕЖИМ 3: Унификация IMG/VID/photo/video ===${NC}\n\n"
+    printf "${PURPLE}=== РЕЖИМ 2: Переименование по шаблонам имен ===${NC}\n\n"
+    log_msg "INFO" "Запуск режима 2 (шаблоны имен)"
 
     processed=0
     renamed=0
@@ -621,7 +640,7 @@ mode_unify() {
 
         if [ -n "$datetime" ]; then
             dir=$(dirname "$file")
-            ext=$(basename "$file" | sed 's/.*\.//')
+            ext="${basename_str##*.}"
 
             # Проверяем наличие миллисекунд
             if echo "$basename_str" | grep -qE '_[0-9]{1,3}\.'; then
@@ -639,24 +658,25 @@ mode_unify() {
                 printf "${YELLOW}  - Уже имеет правильный формат${NC}\n"
                 s=$((s + 1))
             else
-                # Используем улучшенную safe_rename
-                if safe_rename "$file" "$new_path" "$basename_str"; then
-                    case $? in
-                        0)
-                            printf "${GREEN}  ✓ Переименован в: %s${NC}\n" "$(basename "$new_path")"
-                            r=$((r + 1))
-                            ;;
-                        1)
-                            printf "${RED}  ✗ Ошибка переименования${NC}\n"
-                            e=$((e + 1))
-                            ;;
-                        2)
-                            printf "${YELLOW}  - Уже имеет правильный формат${NC}\n"
-                            s=$((s + 1))
-                            ;;
-                    esac
-                fi
+                safe_rename "$file" "$new_path" "$basename_str"
+                rc=$?
+                case "$rc" in
+                    0)
+                        printf "${GREEN}  ✓ Переименован в: %s${NC}\n" "$(basename "$new_path")"
+                        r=$((r + 1))
+                        ;;
+                    1)
+                        printf "${RED}  ✗ Ошибка переименования${NC}\n"
+                        e=$((e + 1))
+                        ;;
+                    2)
+                        printf "${YELLOW}  - Уже имеет правильный формат${NC}\n"
+                        s=$((s + 1))
+                        ;;
+                esac
             fi
+        else
+            s=$((s + 1))
         fi
 
         echo "$p $r $s $e $img $vid $photo $video" > "$stats_file"
@@ -665,7 +685,7 @@ mode_unify() {
     read processed renamed skipped errors img_count vid_count photo_count video_count < "$stats_file"
     rm -f "$stats_file"
 
-    printf "\n${PURPLE}=== ИТОГ РЕЖИМА 3 ===${NC}\n"
+    printf "\n${PURPLE}=== ИТОГ РЕЖИМА 2 ===${NC}\n"
     printf "${BLUE}Обработано: %d${NC}\n" "$processed"
     printf "${GREEN}Переименовано: %d${NC}\n" "$renamed"
     printf "${YELLOW}Пропущено: %d${NC}\n" "$skipped"
@@ -675,17 +695,31 @@ mode_unify() {
     printf "  VID: %d\n" "$vid_count"
     printf "  photo: %d\n" "$photo_count"
     printf "  video: %d\n" "$video_count"
+    log_msg "INFO" "Итог режима 2: processed=$processed renamed=$renamed skipped=$skipped errors=$errors img=$img_count vid=$vid_count photo=$photo_count video=$video_count"
 
     printf "\n${PURPLE}Нажмите Enter для возврата в меню...${NC}"
-    read dummy
+    read -r dummy
 }
 
-# --- Пункт 4: Переименование по метаданным файла (дата создания/изменения) ---
+# --- Пункт 3: Переименование по метаданным файла (дата создания/изменения) ---
 mode_metadata() {
+    if ! confirm_mode \
+        "РЕЖИМ 3: Переименование по метаданным файла" \
+        "Как работает режим:
+- Обрабатывает только фото и видео.
+- Берет дату создания и дату изменения файла.
+- Выбирает наиболее раннюю дату.
+- Формирует имя: ns_YYYY-MM-DD_HH:MM:SS.ext
+- При наличии наносекунд добавляет миллисекунды: ..._123.ext
+- При конфликте имен использует безопасное авто-добавление суффикса."; then
+        return
+    fi
+
     clear_screen
-    printf "${PURPLE}=== РЕЖИМ 4: Переименование по метаданным файла ===${NC}\n\n"
+    printf "${PURPLE}=== РЕЖИМ 3: Переименование по метаданным файла ===${NC}\n\n"
     printf "${BLUE}Используется наиболее ранняя дата из даты создания и даты изменения${NC}\n"
     printf "${BLUE}Обрабатываются только фото и видео файлы${NC}\n\n"
+    log_msg "INFO" "Запуск режима 3 (метаданные файла)"
 
     processed=0
     renamed=0
@@ -697,9 +731,15 @@ mode_metadata() {
 
     find . -type f -print0 | while IFS= read -r -d '' file; do
         read p r s e < "$stats_file"
-        p=$((p + 1))
-
         filename=$(basename "$file")
+
+        # Обрабатываем только фото и видео
+        if ! is_media_file "$file"; then
+            echo "$p $r $s $e" > "$stats_file"
+            continue
+        fi
+
+        p=$((p + 1))
 
         # Проверяем, нужно ли пропустить файл
         if should_skip_for_metadata "$file"; then
@@ -759,32 +799,40 @@ mode_metadata() {
             if [ -n "$name_date" ] && [ "$name_date" = "$earliest_date" ]; then
                 printf "${YELLOW}  - Файл уже имеет правильную дату в имени, но без префикса ns_${NC}\n"
                 # Переименовываем с добавлением префикса ns_ используя улучшенную safe_rename
-                if safe_rename "$file" "$new_path" "$filename"; then
-                    case $? in
-                        0)
-                            printf "${GREEN}  ✓ Добавлен префикс ns_: %s${NC}\n" "$(basename "$new_path")"
-                            r=$((r + 1))
-                            ;;
-                        1)
-                            printf "${RED}  ✗ Ошибка переименования${NC}\n"
-                            e=$((e + 1))
-                            ;;
-                    esac
-                fi
+                safe_rename "$file" "$new_path" "$filename"
+                rc=$?
+                case "$rc" in
+                    0)
+                        printf "${GREEN}  ✓ Добавлен префикс ns_: %s${NC}\n" "$(basename "$new_path")"
+                        r=$((r + 1))
+                        ;;
+                    1)
+                        printf "${RED}  ✗ Ошибка переименования${NC}\n"
+                        e=$((e + 1))
+                        ;;
+                    2)
+                        printf "${YELLOW}  - Уже имеет правильный формат${NC}\n"
+                        s=$((s + 1))
+                        ;;
+                esac
             else
                 # Используем улучшенную safe_rename для обычного переименования
-                if safe_rename "$file" "$new_path" "$filename"; then
-                    case $? in
-                        0)
-                            printf "${GREEN}  ✓ Переименован в: %s${NC}\n" "$(basename "$new_path")"
-                            r=$((r + 1))
-                            ;;
-                        1)
-                            printf "${RED}  ✗ Ошибка переименования${NC}\n"
-                            e=$((e + 1))
-                            ;;
-                    esac
-                fi
+                safe_rename "$file" "$new_path" "$filename"
+                rc=$?
+                case "$rc" in
+                    0)
+                        printf "${GREEN}  ✓ Переименован в: %s${NC}\n" "$(basename "$new_path")"
+                        r=$((r + 1))
+                        ;;
+                    1)
+                        printf "${RED}  ✗ Ошибка переименования${NC}\n"
+                        e=$((e + 1))
+                        ;;
+                    2)
+                        printf "${YELLOW}  - Уже имеет правильный формат${NC}\n"
+                        s=$((s + 1))
+                        ;;
+                esac
             fi
         else
             printf "${YELLOW}[%d] Не удалось получить дату для: %s${NC}\n" "$p" "$filename"
@@ -797,14 +845,15 @@ mode_metadata() {
     read processed renamed skipped errors < "$stats_file"
     rm -f "$stats_file"
 
-    printf "\n${PURPLE}=== ИТОГ РЕЖИМА 4 ===${NC}\n"
+    printf "\n${PURPLE}=== ИТОГ РЕЖИМА 3 ===${NC}\n"
     printf "${BLUE}Обработано: %d${NC}\n" "$processed"
     printf "${GREEN}Переименовано: %d${NC}\n" "$renamed"
     printf "${YELLOW}Пропущено: %d${NC}\n" "$skipped"
     printf "${RED}Ошибок: %d${NC}\n" "$errors"
+    log_msg "INFO" "Итог режима 3: processed=$processed renamed=$renamed skipped=$skipped errors=$errors"
 
     printf "\n${PURPLE}Нажмите Enter для возврата в меню...${NC}"
-    read dummy
+    read -r dummy
 }
 
 # --- Главное меню ---
@@ -814,40 +863,43 @@ show_menu() {
     printf "${PURPLE}        MEDIA RENAMER UTILITY${NC}\n"
     printf "${PURPLE}========================================${NC}\n"
     printf "${BLUE}1 - Переименование по EXIF${NC}\n"
-    printf "${BLUE}2 - Переименование скриншотов${NC}\n"
-    printf "${BLUE}3 - Унификация IMG/VID/photo/video${NC}\n"
-    printf "${BLUE}4 - Переименование по метаданным файла${NC}\n"
+    printf "${BLUE}2 - Переименование по шаблонам имен${NC}\n"
+    printf "${BLUE}3 - Переименование по метаданным файла${NC}\n"
     printf "${RED}0 - Выход${NC}\n"
+    printf "${YELLOW}Лог: %s${NC}\n" "$LOG_FILE"
     printf "${PURPLE}========================================${NC}\n"
     printf "Выберите пункт: "
 }
 
 # --- Основной цикл программы ---
 main() {
+    if ! init_logging; then
+        exit 1
+    fi
+
     while true; do
         show_menu
-        read choice
+        read -r choice
 
         case $choice in
             1)
                 mode_exif
                 ;;
             2)
-                mode_screenshots
+                mode_name_patterns
                 ;;
             3)
-                mode_unify
-                ;;
-            4)
                 mode_metadata
                 ;;
             0)
                 clear_screen
                 printf "${GREEN}До свидания!${NC}\n"
+                log_msg "INFO" "Завершение работы пользователем."
                 exit 0
                 ;;
             *)
-                printf "${RED}Неверный выбор. Пожалуйста, выберите 0-4.${NC}\n"
+                printf "${RED}Неверный выбор. Пожалуйста, выберите 0-3.${NC}\n"
+                log_msg "WARN" "Неверный выбор меню: '$choice'"
                 sleep 2
                 ;;
         esac
