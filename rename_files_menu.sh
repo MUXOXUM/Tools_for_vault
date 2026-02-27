@@ -293,7 +293,7 @@ extract_datetime_from_name() {
     if echo "$basename_str" | grep -qE '^Снимок экрана [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{6}'; then
         date_part=$(echo "$basename_str" | sed -n 's/^Снимок экрана \([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}\) \([0-9]\{6\}\).*$/\1 \2/p')
         if [ -n "$date_part" ]; then
-            formatted_date=$(echo "$date_part" | sed 's/\([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}\) \([0-9]\{2\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)/\1_\2:\3:\4/')
+            formatted_date=$(echo "$date_part" | sed 's/\([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}\) \([0-9]\{2\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)/\1_\2.\3.\4/')
             echo "$formatted_date"
             return 0
         fi
@@ -303,7 +303,7 @@ extract_datetime_from_name() {
     if echo "$basename_str" | grep -qE '^Снимок экрана_[0-9]{8}_[0-9]{6}'; then
         date_part=$(echo "$basename_str" | sed -n 's/^Снимок экрана_\([0-9]\{8\}\)_\([0-9]\{6\}\).*$/\1 \2/p')
         if [ -n "$date_part" ]; then
-            formatted_date=$(echo "$date_part" | sed 's/\([0-9]\{4\}\)\([0-9]\{2\}\)\([0-9]\{2\}\) \([0-9]\{2\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)/\1-\2-\3_\4:\5:\6/')
+            formatted_date=$(echo "$date_part" | sed 's/\([0-9]\{4\}\)\([0-9]\{2\}\)\([0-9]\{2\}\) \([0-9]\{2\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)/\1-\2-\3_\4.\5.\6/')
             echo "$formatted_date"
             return 0
         fi
@@ -311,25 +311,43 @@ extract_datetime_from_name() {
 
     # Шаблон: Снимок экрана YYYY-MM-DD HH-MM-SS
     if echo "$basename_str" | grep -qE '^Снимок экрана [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}-[0-9]{2}-[0-9]{2}'; then
-        echo "$basename_str" | sed -n 's/^Снимок экрана \([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}\) \([0-9]\{2\}\)-\([0-9]\{2\}\)-\([0-9]\{2\}\).*$/\1_\2:\3:\4/p'
+        echo "$basename_str" | sed -n 's/^Снимок экрана \([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}\) \([0-9]\{2\}\)-\([0-9]\{2\}\)-\([0-9]\{2\}\).*$/\1_\2.\3.\4/p'
+        return 0
+    fi
+
+    # Шаблон: YYYY-MM-DD_HH.MM.SS_ms
+    if echo "$basename_str" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}\.[0-9]{2}\.[0-9]{2}_[0-9]{1,3}$'; then
+        echo "$basename_str" | sed -n 's/^\([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}\)_\([0-9]\{2\}\)\.\([0-9]\{2\}\)\.\([0-9]\{2\}\)_\([0-9]\{1,3\}\)$/\1_\2.\3.\4_\5/p'
         return 0
     fi
 
     # Шаблон: YYYY-MM-DD_HH.MM.SS
-    if echo "$basename_str" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}\.[0-9]{2}\.[0-9]{2}'; then
-        echo "$basename_str" | sed -n 's/^\([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}\)_\([0-9]\{2\}\)\.\([0-9]\{2\}\)\.\([0-9]\{2\}\).*$/\1_\2:\3:\4/p'
+    if echo "$basename_str" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}\.[0-9]{2}\.[0-9]{2}$'; then
+        echo "$basename_str" | sed -n 's/^\([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}\)_\([0-9]\{2\}\)\.\([0-9]\{2\}\)\.\([0-9]\{2\}\)$/\1_\2.\3.\4/p'
+        return 0
+    fi
+
+    # Шаблон: YYYY-MM-DD_HH:MM:SS_ms
+    if echo "$basename_str" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}:[0-9]{2}:[0-9]{2}_[0-9]{1,3}$'; then
+        echo "$basename_str" | sed -n 's/^\([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}\)_\([0-9]\{2\}\):\([0-9]\{2\}\):\([0-9]\{2\}\)_\([0-9]\{1,3\}\)$/\1_\2.\3.\4_\5/p'
+        return 0
+    fi
+
+    # Шаблон: YYYY-MM-DD_HH:MM:SS
+    if echo "$basename_str" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}:[0-9]{2}:[0-9]{2}$'; then
+        echo "$basename_str" | sed -n 's/^\([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}\)_\([0-9]\{2\}\):\([0-9]\{2\}\):\([0-9]\{2\}\)$/\1_\2.\3.\4/p'
         return 0
     fi
 
     # Шаблон: Capture YYYY-MM-DD HH_MM_SS
     if echo "$basename_str" | grep -qE '^Capture [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}_[0-9]{2}_[0-9]{2}'; then
-        echo "$basename_str" | sed -n 's/^Capture \([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}\) \([0-9]\{2\}\)_\([0-9]\{2\}\)_\([0-9]\{2\}\).*$/\1_\2:\3:\4/p'
+        echo "$basename_str" | sed -n 's/^Capture \([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}\) \([0-9]\{2\}\)_\([0-9]\{2\}\)_\([0-9]\{2\}\).*$/\1_\2.\3.\4/p'
         return 0
     fi
 
     # Шаблон: Capture_YYYY-MM-DD_HH_MM_SS
     if echo "$basename_str" | grep -qE '^Capture_[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}_[0-9]{2}_[0-9]{2}'; then
-        echo "$basename_str" | sed -n 's/^Capture_\([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}\)_\([0-9]\{2\}\)_\([0-9]\{2\}\)_\([0-9]\{2\}\).*$/\1_\2:\3:\4/p'
+        echo "$basename_str" | sed -n 's/^Capture_\([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}\)_\([0-9]\{2\}\)_\([0-9]\{2\}\)_\([0-9]\{2\}\).*$/\1_\2.\3.\4/p'
         return 0
     fi
 
@@ -337,7 +355,7 @@ extract_datetime_from_name() {
     if echo "$basename_str" | grep -qE '^Screenshot[0-9]{8}-[0-9]{6}'; then
         date_part=$(echo "$basename_str" | sed -n 's/^Screenshot\([0-9]\{8\}\)-\([0-9]\{6\}\).*$/\1 \2/p')
         if [ -n "$date_part" ]; then
-            formatted_date=$(echo "$date_part" | sed 's/\([0-9]\{4\}\)\([0-9]\{2\}\)\([0-9]\{2\}\) \([0-9]\{2\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)/\1-\2-\3_\4:\5:\6/')
+            formatted_date=$(echo "$date_part" | sed 's/\([0-9]\{4\}\)\([0-9]\{2\}\)\([0-9]\{2\}\) \([0-9]\{2\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)/\1-\2-\3_\4.\5.\6/')
             echo "$formatted_date"
             return 0
         fi
@@ -347,7 +365,7 @@ extract_datetime_from_name() {
     if echo "$basename_str" | grep -qE '^Screenshot [0-9]{8} [0-9]{6}'; then
         date_part=$(echo "$basename_str" | sed -n 's/^Screenshot \([0-9]\{8\}\) \([0-9]\{6\}\).*$/\1 \2/p')
         if [ -n "$date_part" ]; then
-            formatted_date=$(echo "$date_part" | sed 's/\([0-9]\{4\}\)\([0-9]\{2\}\)\([0-9]\{2\}\) \([0-9]\{2\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)/\1-\2-\3_\4:\5:\6/')
+            formatted_date=$(echo "$date_part" | sed 's/\([0-9]\{4\}\)\([0-9]\{2\}\)\([0-9]\{2\}\) \([0-9]\{2\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)/\1-\2-\3_\4.\5.\6/')
             echo "$formatted_date"
             return 0
         fi
@@ -357,7 +375,7 @@ extract_datetime_from_name() {
     if echo "$basename_str" | grep -qE '^Screenshot_[0-9]{8}_[0-9]{6}'; then
         date_part=$(echo "$basename_str" | sed -n 's/^Screenshot_\([0-9]\{8\}\)_\([0-9]\{6\}\).*$/\1 \2/p')
         if [ -n "$date_part" ]; then
-            formatted_date=$(echo "$date_part" | sed 's/\([0-9]\{4\}\)\([0-9]\{2\}\)\([0-9]\{2\}\) \([0-9]\{2\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)/\1-\2-\3_\4:\5:\6/')
+            formatted_date=$(echo "$date_part" | sed 's/\([0-9]\{4\}\)\([0-9]\{2\}\)\([0-9]\{2\}\) \([0-9]\{2\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)/\1-\2-\3_\4.\5.\6/')
             echo "$formatted_date"
             return 0
         fi
@@ -368,7 +386,7 @@ extract_datetime_from_name() {
     if echo "$basename_str" | grep -qE '^(IMG|VID)_[0-9]{8}_[0-9]{6}'; then
         date_part=$(echo "$basename_str" | sed -n 's/^[A-Z]\{3\}_\([0-9]\{8\}\)_\([0-9]\{6\}\).*$/\1 \2/p')
         if [ -n "$date_part" ]; then
-            formatted_date=$(echo "$date_part" | sed 's/\([0-9]\{4\}\)\([0-9]\{2\}\)\([0-9]\{2\}\) \([0-9]\{2\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)/\1-\2-\3_\4:\5:\6/')
+            formatted_date=$(echo "$date_part" | sed 's/\([0-9]\{4\}\)\([0-9]\{2\}\)\([0-9]\{2\}\) \([0-9]\{2\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)/\1-\2-\3_\4.\5.\6/')
             echo "$formatted_date"
             return 0
         fi
@@ -378,7 +396,7 @@ extract_datetime_from_name() {
     if echo "$basename_str" | grep -qE '^(IMG|VID)_[0-9]{8}_[0-9]{6}_[0-9]{1,3}'; then
         date_part=$(echo "$basename_str" | sed -n 's/^[A-Z]\{3\}_\([0-9]\{8\}\)_\([0-9]\{6\}\)_[0-9]\{1,3\}$/\1 \2/p')
         if [ -n "$date_part" ]; then
-            formatted_date=$(echo "$date_part" | sed 's/\([0-9]\{4\}\)\([0-9]\{2\}\)\([0-9]\{2\}\) \([0-9]\{2\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)/\1-\2-\3_\4:\5:\6/')
+            formatted_date=$(echo "$date_part" | sed 's/\([0-9]\{4\}\)\([0-9]\{2\}\)\([0-9]\{2\}\) \([0-9]\{2\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)/\1-\2-\3_\4.\5.\6/')
             ms=$(echo "$basename_str" | sed -n 's/^[A-Z]\{3\}_[0-9]\{8\}_[0-9]\{6\}_\([0-9]\{1,3\}\)$/\1/p')
             echo "${formatted_date}_${ms}"
             return 0
@@ -387,25 +405,25 @@ extract_datetime_from_name() {
 
     # [IMG|VID]_YYYYMMDD_HH-MM-SS
     if echo "$basename_str" | grep -qE '^(IMG|VID)_[0-9]{8}_[0-9]{2}-[0-9]{2}-[0-9]{2}'; then
-        echo "$basename_str" | sed -n 's/^[A-Z]\{3\}_\([0-9]\{8\}\)_\([0-9]\{2\}\)-\([0-9]\{2\}\)-\([0-9]\{2\}\).*$/\1 \2:\3:\4/p' | sed 's/\([0-9]\{4\}\)\([0-9]\{2\}\)\([0-9]\{2\}\) /\1-\2-\3_/'
+        echo "$basename_str" | sed -n 's/^[A-Z]\{3\}_\([0-9]\{8\}\)_\([0-9]\{2\}\)-\([0-9]\{2\}\)-\([0-9]\{2\}\).*$/\1 \2.\3.\4/p' | sed 's/\([0-9]\{4\}\)\([0-9]\{2\}\)\([0-9]\{2\}\) /\1-\2-\3_/'
         return 0
     fi
 
     # [IMG|VID]_YYYY-MM-DD_HH-MM-SS
     if echo "$basename_str" | grep -qE '^(IMG|VID)_[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}'; then
-        echo "$basename_str" | sed -n 's/^[A-Z]\{3\}_\([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}\)_\([0-9]\{2\}\)-\([0-9]\{2\}\)-\([0-9]\{2\}\).*$/\1_\2:\3:\4/p'
+        echo "$basename_str" | sed -n 's/^[A-Z]\{3\}_\([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}\)_\([0-9]\{2\}\)-\([0-9]\{2\}\)-\([0-9]\{2\}\).*$/\1_\2.\3.\4/p'
         return 0
     fi
 
     # photo/video_YYYY-MM-DD_HH-MM-SS
     if echo "$basename_str" | grep -qE '^(photo|video)_[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}'; then
-        echo "$basename_str" | sed -n 's/^[a-z]\{5\}_\([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}\)_\([0-9]\{2\}\)-\([0-9]\{2\}\)-\([0-9]\{2\}\).*$/\1_\2:\3:\4/p'
+        echo "$basename_str" | sed -n 's/^[a-z]\{5\}_\([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}\)_\([0-9]\{2\}\)-\([0-9]\{2\}\)-\([0-9]\{2\}\).*$/\1_\2.\3.\4/p'
         return 0
     fi
 
     # Photo_YYYY-MM-DD-HHMMSS или Video_YYYY-MM-DD-HHMMSS
     if echo "$basename_str" | grep -qE '^(Photo|Video)_[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}'; then
-        echo "$basename_str" | sed -n 's/^[Pp]hoto_\|^[Vv]ideo_//p' | sed 's/\([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}\)-\([0-9]\{2\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)/\1_\2:\3:\4/'
+        echo "$basename_str" | sed -n 's/^[Pp]hoto_\|^[Vv]ideo_//p' | sed 's/\([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}\)-\([0-9]\{2\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)/\1_\2.\3.\4/'
         return 0
     fi
 
@@ -508,33 +526,33 @@ should_skip_for_metadata() {
         return 0
     fi
 
-    # Пропускаем уже переименованные по шаблону ns_YYYY-MM-DD_HH:MM:SS.*
-    # (с двоеточиями, без миллисекунд)
-    if echo "$basename_str" | grep -qE '^ns_[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}:[0-9]{2}:[0-9]{2}\.[^.]+$'; then
+    # Пропускаем уже переименованные по шаблону ns_YYYY-MM-DD_HH.MM.SS.*
+    # (точки как основной формат; двоеточия тоже допускаются для совместимости)
+    if echo "$basename_str" | grep -qE '^ns_[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}[:.][0-9]{2}[:.][0-9]{2}\.[^.]+$'; then
         return 0
     fi
 
-    # Пропускаем уже переименованные по шаблону ns_YYYY-MM-DD_HH:MM:SS_XXX.ext
+    # Пропускаем уже переименованные по шаблону ns_YYYY-MM-DD_HH.MM.SS_XXX.ext
     # (с миллисекундами от 1 до 3 цифр)
-    if echo "$basename_str" | grep -qE '^ns_[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}:[0-9]{2}:[0-9]{2}_[0-9]{1,3}\.[^.]+$'; then
+    if echo "$basename_str" | grep -qE '^ns_[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}[:.][0-9]{2}[:.][0-9]{2}_[0-9]{1,3}\.[^.]+$'; then
         return 0
     fi
 
-    # Пропускаем уже переименованные по шаблону ns_YYYY-MM-DD_HH:MM:SS_XXX_YYY.ext
+    # Пропускаем уже переименованные по шаблону ns_YYYY-MM-DD_HH.MM.SS_XXX_YYY.ext
     # (с миллисекундами и дополнительным счетчиком)
-    if echo "$basename_str" | grep -qE '^ns_[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}:[0-9]{2}:[0-9]{2}_[0-9]{1,3}_[0-9]+\.[^.]+$'; then
+    if echo "$basename_str" | grep -qE '^ns_[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}[:.][0-9]{2}[:.][0-9]{2}_[0-9]{1,3}_[0-9]+\.[^.]+$'; then
         return 0
     fi
 
-    # Пропускаем файлы, которые УЖЕ имеют правильный формат даты YYYY-MM-DD_HH:MM:SS (без префикса ns_)
-    # (с двоеточиями, без миллисекунд)
-    if echo "$basename_str" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}:[0-9]{2}:[0-9]{2}\.[^.]+$'; then
+    # Пропускаем файлы, которые УЖЕ имеют правильный формат даты YYYY-MM-DD_HH.MM.SS (без префикса ns_)
+    # (точки как основной формат; двоеточия тоже допускаются для совместимости)
+    if echo "$basename_str" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}[:.][0-9]{2}[:.][0-9]{2}\.[^.]+$'; then
         return 0
     fi
 
-    # Пропускаем файлы, которые УЖЕ имеют правильный формат даты с миллисекундами YYYY-MM-DD_HH:MM:SS_XXX.ext
+    # Пропускаем файлы, которые УЖЕ имеют правильный формат даты с миллисекундами YYYY-MM-DD_HH.MM.SS_XXX.ext
     # (с миллисекундами от 1 до 3 цифр, без префикса ns_)
-    if echo "$basename_str" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}:[0-9]{2}:[0-9]{2}_[0-9]{1,3}\.[^.]+$'; then
+    if echo "$basename_str" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}[:.][0-9]{2}[:.][0-9]{2}_[0-9]{1,3}\.[^.]+$'; then
         return 0
     fi
 
@@ -558,7 +576,7 @@ mode_exif_body() {
             file_ext="${filename##*.}"
 
             # Извлечение даты из EXIF
-            datetime=$(exiftool -d "%Y-%m-%d_%H:%M:%S" -DateTimeOriginal -CreateDate -ModifyDate "$file" 2>/dev/null | head -1 | sed 's/^.*: //')
+            datetime=$(exiftool -d "%Y-%m-%d_%H.%M.%S" -DateTimeOriginal -CreateDate -ModifyDate "$file" 2>/dev/null | head -1 | sed 's/^.*: //')
             subsec=$(exiftool -SubSecTimeOriginal "$file" 2>/dev/null | head -1 | sed 's/^.*: //')
 
             if [ -z "$subsec" ]; then
@@ -627,8 +645,8 @@ mode_exif() {
         "РЕЖИМ 1: Переименование по EXIF" \
         "Как работает режим:
 - Обрабатывает только фотофайлы с EXIF-датой.
-- Переименовывает в формат: YYYY-MM-DD_HH:MM:SS.ext
-- Если есть SubSec, добавляет миллисекунды: YYYY-MM-DD_HH:MM:SS_123.ext
+- Переименовывает в формат: YYYY-MM-DD_HH.MM.SS.ext
+- Если есть SubSec, добавляет миллисекунды: YYYY-MM-DD_HH.MM.SS_123.ext
 - При конфликте имен использует безопасное авто-добавление суффикса."; then
         return
     fi
@@ -706,14 +724,9 @@ mode_name_patterns_body() {
         if [ -n "$datetime" ]; then
             dir=$(dirname "$file")
             ext="${basename_str##*.}"
-
-            # Проверяем наличие миллисекунд
-            if echo "$basename_str" | grep -qE '_[0-9]{1,3}\.'; then
-                ms=$(echo "$basename_str" | sed -n 's/.*_\([0-9]\{1,3\}\)\..*$/\1/p')
-                new_name="${datetime}_${ms}.${ext}"
-            else
-                new_name="${datetime}.${ext}"
-            fi
+            # extract_datetime_from_name уже возвращает дату в нужном формате,
+            # включая миллисекунды (если они есть).
+            new_name="${datetime}.${ext}"
 
             new_path="$dir/$new_name"
             log_msg "INFO" "Режим 2: обработка [$p] '$basename_str'"
@@ -776,7 +789,9 @@ mode_name_patterns() {
   13) IMG_YYYY-MM-DD_HH-MM-SS / VID_YYYY-MM-DD_HH-MM-SS
   14) photo_YYYY-MM-DD_HH-MM-SS / video_YYYY-MM-DD_HH-MM-SS
   15) Photo_YYYY-MM-DD-HHMMSS / Video_YYYY-MM-DD-HHMMSS
-- Переименовывает в единый формат: YYYY-MM-DD_HH:MM:SS.ext
+  16) YYYY-MM-DD_HH:MM:SS
+  17) YYYY-MM-DD_HH:MM:SS_999
+- Переименовывает в единый формат: YYYY-MM-DD_HH.MM.SS.ext
 - Если в исходном имени есть миллисекунды, сохраняет их: ..._123.ext
 - При конфликте имен использует безопасное авто-добавление суффикса."; then
         return
@@ -867,11 +882,12 @@ mode_metadata_body() {
                 nanoseconds=""
             fi
 
-            # Формируем новое имя с префиксом ns_
+            # Формируем новое имя с префиксом ns_ (в формате времени с точками)
+            earliest_date_for_name=$(echo "$earliest_date" | tr ':' '.')
             if [ -n "$nanoseconds" ] && [ "$nanoseconds" -gt 0 ] 2>/dev/null; then
-                new_name="ns_${earliest_date}_${nanoseconds}.${ext}"
+                new_name="ns_${earliest_date_for_name}_${nanoseconds}.${ext}"
             else
-                new_name="ns_${earliest_date}.${ext}"
+                new_name="ns_${earliest_date_for_name}.${ext}"
             fi
 
             new_path="$dir/$new_name"
@@ -880,10 +896,11 @@ mode_metadata_body() {
             log_msg "INFO" "Режим 3: дата создания='${create_date:-недоступна}', дата изменения='$modify_date', выбрана='$earliest_date', мс='${nanoseconds:-нет}'"
 
             # Проверяем, не совпадает ли новое имя с именем файла, который уже имеет правильный формат
-            # Извлекаем дату из имени файла, если она есть в формате YYYY-MM-DD_HH:MM:SS
-            name_date=$(echo "$filename" | grep -oE '^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}:[0-9]{2}:[0-9]{2}')
+            # Извлекаем дату из имени файла, если она есть в формате YYYY-MM-DD_HH.MM.SS или YYYY-MM-DD_HH:MM:SS
+            name_date=$(echo "$filename" | grep -oE '^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}[:.][0-9]{2}[:.][0-9]{2}')
+            name_date_normalized=$(echo "$name_date" | tr '.' ':')
 
-            if [ -n "$name_date" ] && [ "$name_date" = "$earliest_date" ]; then
+            if [ -n "$name_date" ] && [ "$name_date_normalized" = "$earliest_date" ]; then
                 log_msg "INFO" "Режим 3: файл уже содержит правильную дату, добавляется префикс ns_"
                 # Переименовываем с добавлением префикса ns_ используя улучшенную safe_rename
                 safe_rename "$file" "$new_path" "$filename"
@@ -944,7 +961,7 @@ mode_metadata() {
 - Обрабатывает только фото и видео.
 - Берет дату создания и дату изменения файла.
 - Выбирает наиболее раннюю дату.
-- Формирует имя: ns_YYYY-MM-DD_HH:MM:SS.ext
+- Формирует имя: ns_YYYY-MM-DD_HH.MM.SS.ext
 - При наличии наносекунд добавляет миллисекунды: ..._123.ext
 - При конфликте имен использует безопасное авто-добавление суффикса."; then
         return
