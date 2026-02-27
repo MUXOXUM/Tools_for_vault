@@ -17,6 +17,11 @@ NC='\033[0m' # No Color
 # --- Глобальные переменные ---
 SCRIPT_NAME="$(basename "$0")"
 LOG_FILE=""
+SPINNER_PID=""
+SPINNER_TEXT=""
+QUIET_CONSOLE=0
+MAIN_PID="$BASHPID"
+SHUTTING_DOWN=0
 
 # --- Расширения медиафайлов ---
 IMAGE_EXTENSIONS="jpg jpeg png gif bmp tiff tif webp heic heif avif"
@@ -24,11 +29,28 @@ VIDEO_EXTENSIONS="mp4 mkv avi mov wmv flv m4v mpg mpeg webm 3gp 3g2 ogv"
 
 # --- Обработка сигналов ---
 cleanup() {
+    signal_name="${1:-INT}"
+
+    # Если сигнал пойман в дочернем shell (например, в pipeline),
+    # пробрасываем его в главный процесс скрипта.
+    if [ "$BASHPID" -ne "$MAIN_PID" ]; then
+        kill -s "$signal_name" "$MAIN_PID" 2>/dev/null
+        exit 130
+    fi
+
+    if [ "$SHUTTING_DOWN" -eq 1 ]; then
+        exit 130
+    fi
+    SHUTTING_DOWN=1
+    trap - INT TERM
+
+    stop_spinner
     printf "\n${YELLOW}Получен сигнал завершения. Выход...${NC}\n"
     log_msg "INFO" "Получен сигнал завершения, выход."
-    exit 0
+    exit 130
 }
-trap cleanup INT TERM
+trap 'cleanup INT' INT
+trap 'cleanup TERM' TERM
 
 # --- Очистка экрана ---
 clear_screen() {
@@ -59,6 +81,62 @@ log_msg() {
     if [ -n "$LOG_FILE" ]; then
         printf '[%s] [%s] %s\n' "$now" "$level" "$message" >> "$LOG_FILE"
     fi
+}
+
+# --- Консольный спиннер ---
+start_spinner() {
+    text="$1"
+    SPINNER_TEXT="$text"
+
+    if [ -n "$SPINNER_PID" ] && kill -0 "$SPINNER_PID" 2>/dev/null; then
+        return 0
+    fi
+
+    (
+        trap 'exit 0' INT TERM
+        i=0
+        while true; do
+            case $((i % 4)) in
+                0) frame='|' ;;
+                1) frame='/' ;;
+                2) frame='-' ;;
+                3) frame='\' ;;
+            esac
+            printf "\r${BLUE}%s %s${NC}" "$frame" "$text"
+            i=$((i + 1))
+            sleep 0.1
+        done
+    ) &
+    SPINNER_PID=$!
+}
+
+stop_spinner() {
+    if [ -n "$SPINNER_PID" ] && kill -0 "$SPINNER_PID" 2>/dev/null; then
+        kill "$SPINNER_PID" 2>/dev/null
+        wait "$SPINNER_PID" 2>/dev/null
+    fi
+
+    if [ -n "$SPINNER_TEXT" ]; then
+        clear_len=$(( ${#SPINNER_TEXT} + 6 ))
+        printf "\r%*s\r" "$clear_len" ""
+    fi
+
+    SPINNER_PID=""
+    SPINNER_TEXT=""
+}
+
+run_mode_with_spinner() {
+    spinner_text="$1"
+    shift
+
+    prev_quiet="$QUIET_CONSOLE"
+    QUIET_CONSOLE=1
+    start_spinner "$spinner_text"
+    "$@"
+    rc=$?
+    stop_spinner
+    QUIET_CONSOLE="$prev_quiet"
+    return $rc
 }
 
 # --- Подтверждение запуска режима ---
@@ -166,8 +244,7 @@ safe_rename() {
             done
             new_dst="${dir}/${base_without_ms}_${new_ms}_${counter}${ext}"
             if mv "$src" "$new_dst" 2>/dev/null; then
-                printf "${BLUE}Файл существовал, переименован в: %s (добавлен счетчик %d)${NC}\n" "$(basename "$new_dst")" "$counter"
-                log_msg "INFO" "Коллизия имени, переименован: '$src' -> '$new_dst'"
+                log_msg "INFO" "Коллизия имени, переименован: '$src' -> '$new_dst' (добавлен счетчик $counter)"
                 return 0
             else
                 log_msg "ERROR" "Ошибка mv при коллизии: '$src' -> '$new_dst'"
@@ -191,7 +268,6 @@ safe_rename() {
     fi
 
     if mv "$src" "$new_dst" 2>/dev/null; then
-        printf "${BLUE}Файл существовал, переименован в: %s${NC}\n" "$(basename "$new_dst")"
         log_msg "INFO" "Коллизия имени, переименован: '$src' -> '$new_dst'"
         return 0
     else
@@ -459,43 +535,9 @@ should_skip_for_metadata() {
 }
 
 # --- Пункт 1: Переименование по EXIF ---
-mode_exif() {
-    if ! confirm_mode \
-        "РЕЖИМ 1: Переименование по EXIF" \
-        "Как работает режим:
-- Обрабатывает только фотофайлы с EXIF-датой.
-- Переименовывает в формат: YYYY-MM-DD_HH:MM:SS.ext
-- Если есть SubSec, добавляет миллисекунды: YYYY-MM-DD_HH:MM:SS_123.ext
-- При конфликте имен использует безопасное авто-добавление суффикса."; then
-        return
-    fi
+mode_exif_body() {
+    stats_file="$1"
 
-    clear_screen
-    printf "${PURPLE}=== РЕЖИМ 1: Переименование по EXIF ===${NC}\n\n"
-    log_msg "INFO" "Запуск режима 1 (EXIF)"
-
-    # Проверка наличия exiftool
-    if ! check_dependency "exiftool"; then
-        printf "${YELLOW}Для использования этого режима установите exiftool:${NC}\n"
-        printf "${BLUE}  sudo apt install exiftool${NC}\n"
-        printf "${BLUE}  или${NC}\n"
-        printf "${BLUE}  sudo yum install exiftool${NC}\n"
-        printf "\n${PURPLE}Нажмите Enter для возврата в меню...${NC}"
-        read -r dummy
-        return
-    fi
-
-    # Счетчики
-    processed=0
-    renamed=0
-    skipped=0
-    errors=0
-
-    # Временный файл для хранения статистики
-    stats_file=$(mktemp)
-    echo "0 0 0 0" > "$stats_file"
-
-    # Поиск и обработка файлов
     for ext in $IMAGE_EXTENSIONS; do
         # Поиск без учета регистра
         find . -type f -iname "*.$ext" -print0 | while IFS= read -r -d '' file; do
@@ -532,20 +574,21 @@ mode_exif() {
                 rc=$?
                 case "$rc" in
                     0)
-                        printf "${GREEN}  ✓ %s -> %s${NC}\n" "$filename" "$(basename "$new_path")"
+                        log_msg "INFO" "Режим 1: переименован '$filename' -> '$(basename "$new_path")'"
                         r=$((r + 1))
                         ;;
                     1)
-                        printf "${RED}  ✗ Ошибка переименования: %s${NC}\n" "$filename"
+                        log_msg "ERROR" "Режим 1: ошибка переименования '$filename'"
                         e=$((e + 1))
                         ;;
                     2)
-                        # Уже имеет правильное имя - не выводим
+                        log_msg "INFO" "Режим 1: пропуск '$filename' (имя не изменилось)"
                         s=$((s + 1))
                         ;;
                 esac
             else
-                # Нет EXIF данных - пропускаем без вывода
+                # Нет EXIF данных - пропускаем
+                log_msg "INFO" "Режим 1: пропуск '$filename' (нет EXIF даты)"
                 s=$((s + 1))
             fi
 
@@ -553,6 +596,45 @@ mode_exif() {
             echo "$p $r $s $e" > "$stats_file"
         done
     done
+}
+
+mode_exif() {
+    if ! confirm_mode \
+        "РЕЖИМ 1: Переименование по EXIF" \
+        "Как работает режим:
+- Обрабатывает только фотофайлы с EXIF-датой.
+- Переименовывает в формат: YYYY-MM-DD_HH:MM:SS.ext
+- Если есть SubSec, добавляет миллисекунды: YYYY-MM-DD_HH:MM:SS_123.ext
+- При конфликте имен использует безопасное авто-добавление суффикса."; then
+        return
+    fi
+
+    clear_screen
+    printf "${PURPLE}=== РЕЖИМ 1: Переименование по EXIF ===${NC}\n\n"
+    log_msg "INFO" "Запуск режима 1 (EXIF)"
+
+    # Проверка наличия exiftool
+    if ! check_dependency "exiftool"; then
+        printf "${YELLOW}Для использования этого режима установите exiftool:${NC}\n"
+        printf "${BLUE}  sudo apt install exiftool${NC}\n"
+        printf "${BLUE}  или${NC}\n"
+        printf "${BLUE}  sudo yum install exiftool${NC}\n"
+        printf "\n${PURPLE}Нажмите Enter для возврата в меню...${NC}"
+        read -r dummy
+        return
+    fi
+
+    # Счетчики
+    processed=0
+    renamed=0
+    skipped=0
+    errors=0
+
+    # Временный файл для хранения статистики
+    stats_file=$(mktemp)
+    echo "0 0 0 0" > "$stats_file"
+
+    run_mode_with_spinner "Режим 1: обработка файлов..." mode_exif_body "$stats_file"
 
     # Читаем финальную статистику
     read processed renamed skipped errors < "$stats_file"
@@ -571,6 +653,77 @@ mode_exif() {
 }
 
 # --- Пункт 2: Переименование по шаблонам имен (скриншоты + IMG/VID/photo/video) ---
+mode_name_patterns_body() {
+    stats_file="$1"
+
+    find . -type f -print0 | while IFS= read -r -d '' file; do
+        # Проверяем, является ли файл медиафайлом
+        if ! is_media_file "$file"; then
+            continue
+        fi
+
+        read p r s e img vid photo video < "$stats_file"
+        p=$((p + 1))
+        basename_str=$(basename "$file")
+
+        # Определяем тип исходного формата
+        if echo "$basename_str" | grep -qE '^IMG_'; then
+            img=$((img + 1))
+        elif echo "$basename_str" | grep -qE '^VID_'; then
+            vid=$((vid + 1))
+        elif echo "$basename_str" | grep -qE '^photo_'; then
+            photo=$((photo + 1))
+        elif echo "$basename_str" | grep -qE '^video_'; then
+            video=$((video + 1))
+        fi
+
+        datetime=$(extract_datetime_from_name "$file")
+
+        if [ -n "$datetime" ]; then
+            dir=$(dirname "$file")
+            ext="${basename_str##*.}"
+
+            # Проверяем наличие миллисекунд
+            if echo "$basename_str" | grep -qE '_[0-9]{1,3}\.'; then
+                ms=$(echo "$basename_str" | sed -n 's/.*_\([0-9]\{1,3\}\)\..*$/\1/p')
+                new_name="${datetime}_${ms}.${ext}"
+            else
+                new_name="${datetime}.${ext}"
+            fi
+
+            new_path="$dir/$new_name"
+            log_msg "INFO" "Режим 2: обработка [$p] '$basename_str'"
+
+            if [ "$file" = "$new_path" ]; then
+                log_msg "INFO" "Режим 2: пропуск '$basename_str' (уже правильный формат)"
+                s=$((s + 1))
+            else
+                safe_rename "$file" "$new_path" "$basename_str"
+                rc=$?
+                case "$rc" in
+                    0)
+                        log_msg "INFO" "Режим 2: переименован '$basename_str' -> '$(basename "$new_path")'"
+                        r=$((r + 1))
+                        ;;
+                    1)
+                        log_msg "ERROR" "Режим 2: ошибка переименования '$basename_str'"
+                        e=$((e + 1))
+                        ;;
+                    2)
+                        log_msg "INFO" "Режим 2: пропуск '$basename_str' (уже правильный формат)"
+                        s=$((s + 1))
+                        ;;
+                esac
+            fi
+        else
+            log_msg "INFO" "Режим 2: пропуск '$basename_str' (нет подходящего шаблона)"
+            s=$((s + 1))
+        fi
+
+        echo "$p $r $s $e $img $vid $photo $video" > "$stats_file"
+    done
+}
+
 mode_name_patterns() {
     if ! confirm_mode \
         "РЕЖИМ 2: Переименование по шаблонам имен" \
@@ -615,72 +768,7 @@ mode_name_patterns() {
     stats_file=$(mktemp)
     echo "0 0 0 0 0 0 0 0" > "$stats_file"
 
-    find . -type f -print0 | while IFS= read -r -d '' file; do
-        # Проверяем, является ли файл медиафайлом
-        if ! is_media_file "$file"; then
-            continue
-        fi
-
-        read p r s e img vid photo video < "$stats_file"
-        p=$((p + 1))
-        basename_str=$(basename "$file")
-
-        # Определяем тип исходного формата
-        if echo "$basename_str" | grep -qE '^IMG_'; then
-            img=$((img + 1))
-        elif echo "$basename_str" | grep -qE '^VID_'; then
-            vid=$((vid + 1))
-        elif echo "$basename_str" | grep -qE '^photo_'; then
-            photo=$((photo + 1))
-        elif echo "$basename_str" | grep -qE '^video_'; then
-            video=$((video + 1))
-        fi
-
-        datetime=$(extract_datetime_from_name "$file")
-
-        if [ -n "$datetime" ]; then
-            dir=$(dirname "$file")
-            ext="${basename_str##*.}"
-
-            # Проверяем наличие миллисекунд
-            if echo "$basename_str" | grep -qE '_[0-9]{1,3}\.'; then
-                ms=$(echo "$basename_str" | sed -n 's/.*_\([0-9]\{1,3\}\)\..*$/\1/p')
-                new_name="${datetime}_${ms}.${ext}"
-            else
-                new_name="${datetime}.${ext}"
-            fi
-
-            new_path="$dir/$new_name"
-
-            printf "${BLUE}[%d] Обработка: %s${NC}\n" "$p" "$basename_str"
-
-            if [ "$file" = "$new_path" ]; then
-                printf "${YELLOW}  - Уже имеет правильный формат${NC}\n"
-                s=$((s + 1))
-            else
-                safe_rename "$file" "$new_path" "$basename_str"
-                rc=$?
-                case "$rc" in
-                    0)
-                        printf "${GREEN}  ✓ Переименован в: %s${NC}\n" "$(basename "$new_path")"
-                        r=$((r + 1))
-                        ;;
-                    1)
-                        printf "${RED}  ✗ Ошибка переименования${NC}\n"
-                        e=$((e + 1))
-                        ;;
-                    2)
-                        printf "${YELLOW}  - Уже имеет правильный формат${NC}\n"
-                        s=$((s + 1))
-                        ;;
-                esac
-            fi
-        else
-            s=$((s + 1))
-        fi
-
-        echo "$p $r $s $e $img $vid $photo $video" > "$stats_file"
-    done
+    run_mode_with_spinner "Режим 2: обработка файлов..." mode_name_patterns_body "$stats_file"
 
     read processed renamed skipped errors img_count vid_count photo_count video_count < "$stats_file"
     rm -f "$stats_file"
@@ -702,32 +790,8 @@ mode_name_patterns() {
 }
 
 # --- Пункт 3: Переименование по метаданным файла (дата создания/изменения) ---
-mode_metadata() {
-    if ! confirm_mode \
-        "РЕЖИМ 3: Переименование по метаданным файла" \
-        "Как работает режим:
-- Обрабатывает только фото и видео.
-- Берет дату создания и дату изменения файла.
-- Выбирает наиболее раннюю дату.
-- Формирует имя: ns_YYYY-MM-DD_HH:MM:SS.ext
-- При наличии наносекунд добавляет миллисекунды: ..._123.ext
-- При конфликте имен использует безопасное авто-добавление суффикса."; then
-        return
-    fi
-
-    clear_screen
-    printf "${PURPLE}=== РЕЖИМ 3: Переименование по метаданным файла ===${NC}\n\n"
-    printf "${BLUE}Используется наиболее ранняя дата из даты создания и даты изменения${NC}\n"
-    printf "${BLUE}Обрабатываются только фото и видео файлы${NC}\n\n"
-    log_msg "INFO" "Запуск режима 3 (метаданные файла)"
-
-    processed=0
-    renamed=0
-    skipped=0
-    errors=0
-
-    stats_file=$(mktemp)
-    echo "0 0 0 0" > "$stats_file"
+mode_metadata_body() {
+    stats_file="$1"
 
     find . -type f -print0 | while IFS= read -r -d '' file; do
         read p r s e < "$stats_file"
@@ -743,10 +807,7 @@ mode_metadata() {
 
         # Проверяем, нужно ли пропустить файл
         if should_skip_for_metadata "$file"; then
-            # Для немедиафайлов не выводим сообщение
-            if is_media_file "$file"; then
-                printf "${BLUE}[%d] Пропуск: %s (уже имеет правильный формат)${NC}\n" "$p" "$filename"
-            fi
+            log_msg "INFO" "Режим 3: пропуск [$p] '$filename' (уже имеет правильный формат)"
             s=$((s + 1))
             echo "$p $r $s $e" > "$stats_file"
             continue
@@ -784,34 +845,29 @@ mode_metadata() {
 
             new_path="$dir/$new_name"
 
-            printf "${BLUE}[%d] Обработка: %s${NC}\n" "$p" "$filename"
-            printf "  Дата создания: %s\n" "${create_date:-недоступна}"
-            printf "  Дата изменения: %s\n" "$modify_date"
-            printf "  Используется: %s\n" "$earliest_date"
-            if [ -n "$nanoseconds" ]; then
-                printf "  Миллисекунды: %s\n" "$nanoseconds"
-            fi
+            log_msg "INFO" "Режим 3: обработка [$p] '$filename'"
+            log_msg "INFO" "Режим 3: дата создания='${create_date:-недоступна}', дата изменения='$modify_date', выбрана='$earliest_date', мс='${nanoseconds:-нет}'"
 
             # Проверяем, не совпадает ли новое имя с именем файла, который уже имеет правильный формат
             # Извлекаем дату из имени файла, если она есть в формате YYYY-MM-DD_HH:MM:SS
             name_date=$(echo "$filename" | grep -oE '^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}:[0-9]{2}:[0-9]{2}')
 
             if [ -n "$name_date" ] && [ "$name_date" = "$earliest_date" ]; then
-                printf "${YELLOW}  - Файл уже имеет правильную дату в имени, но без префикса ns_${NC}\n"
+                log_msg "INFO" "Режим 3: файл уже содержит правильную дату, добавляется префикс ns_"
                 # Переименовываем с добавлением префикса ns_ используя улучшенную safe_rename
                 safe_rename "$file" "$new_path" "$filename"
                 rc=$?
                 case "$rc" in
                     0)
-                        printf "${GREEN}  ✓ Добавлен префикс ns_: %s${NC}\n" "$(basename "$new_path")"
+                        log_msg "INFO" "Режим 3: добавлен префикс ns_ '$filename' -> '$(basename "$new_path")'"
                         r=$((r + 1))
                         ;;
                     1)
-                        printf "${RED}  ✗ Ошибка переименования${NC}\n"
+                        log_msg "ERROR" "Режим 3: ошибка переименования '$filename'"
                         e=$((e + 1))
                         ;;
                     2)
-                        printf "${YELLOW}  - Уже имеет правильный формат${NC}\n"
+                        log_msg "INFO" "Режим 3: пропуск '$filename' (имя не изменилось)"
                         s=$((s + 1))
                         ;;
                 esac
@@ -821,26 +877,54 @@ mode_metadata() {
                 rc=$?
                 case "$rc" in
                     0)
-                        printf "${GREEN}  ✓ Переименован в: %s${NC}\n" "$(basename "$new_path")"
+                        log_msg "INFO" "Режим 3: переименован '$filename' -> '$(basename "$new_path")'"
                         r=$((r + 1))
                         ;;
                     1)
-                        printf "${RED}  ✗ Ошибка переименования${NC}\n"
+                        log_msg "ERROR" "Режим 3: ошибка переименования '$filename'"
                         e=$((e + 1))
                         ;;
                     2)
-                        printf "${YELLOW}  - Уже имеет правильный формат${NC}\n"
+                        log_msg "INFO" "Режим 3: пропуск '$filename' (имя не изменилось)"
                         s=$((s + 1))
                         ;;
                 esac
             fi
         else
-            printf "${YELLOW}[%d] Не удалось получить дату для: %s${NC}\n" "$p" "$filename"
+            log_msg "WARN" "Режим 3: не удалось получить дату для '$filename'"
             s=$((s + 1))
         fi
 
         echo "$p $r $s $e" > "$stats_file"
     done
+}
+
+mode_metadata() {
+    if ! confirm_mode \
+        "РЕЖИМ 3: Переименование по метаданным файла" \
+        "Как работает режим:
+- Обрабатывает только фото и видео.
+- Берет дату создания и дату изменения файла.
+- Выбирает наиболее раннюю дату.
+- Формирует имя: ns_YYYY-MM-DD_HH:MM:SS.ext
+- При наличии наносекунд добавляет миллисекунды: ..._123.ext
+- При конфликте имен использует безопасное авто-добавление суффикса."; then
+        return
+    fi
+
+    clear_screen
+    printf "${PURPLE}=== РЕЖИМ 3: Переименование по метаданным файла ===${NC}\n\n"
+    log_msg "INFO" "Запуск режима 3 (метаданные файла)"
+
+    processed=0
+    renamed=0
+    skipped=0
+    errors=0
+
+    stats_file=$(mktemp)
+    echo "0 0 0 0" > "$stats_file"
+
+    run_mode_with_spinner "Режим 3: обработка файлов..." mode_metadata_body "$stats_file"
 
     read processed renamed skipped errors < "$stats_file"
     rm -f "$stats_file"
