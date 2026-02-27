@@ -558,11 +558,15 @@ mode_exif_body() {
             file_ext="${filename##*.}"
 
             # Извлечение даты из EXIF
-            datetime=$(exiftool -d "%Y-%m-%d_%H:%M:%S" -DateTimeOriginal -SubSecTimeOriginal -CreateDate -d "%Y-%m-%d_%H:%M:%S" "$file" 2>/dev/null | head -1 | sed 's/^.*: //')
+            datetime=$(exiftool -d "%Y-%m-%d_%H:%M:%S" -DateTimeOriginal -CreateDate -ModifyDate "$file" 2>/dev/null | head -1 | sed 's/^.*: //')
             subsec=$(exiftool -SubSecTimeOriginal "$file" 2>/dev/null | head -1 | sed 's/^.*: //')
 
             if [ -z "$subsec" ]; then
                 subsec=$(exiftool -SubSecCreateDate "$file" 2>/dev/null | head -1 | sed 's/^.*: //' | cut -d'.' -f2)
+            fi
+
+            if [ -z "$subsec" ]; then
+                subsec=$(exiftool -SubSecModifyDate "$file" 2>/dev/null | head -1 | sed 's/^.*: //' | cut -d'.' -f2)
             fi
 
             if [ -n "$datetime" ]; then
