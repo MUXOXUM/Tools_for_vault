@@ -208,9 +208,11 @@ function setupPanelResize() {
   panelSplitter.addEventListener("pointercancel", stopResize);
 }
 
-function parseFolderName(name) {
+function parseFolderNameAnalysis(name) {
   const matches = Array.from(name.matchAll(/\[([^\]]+)\]/g));
-  if (!matches.length) return null;
+  if (!matches.length) {
+    return { parsed: null, reason: "Нет блоков в квадратных скобках" };
+  }
 
   let dateBlockIndex = -1;
   let parsedDate = null;
@@ -223,7 +225,9 @@ function parseFolderName(name) {
       break;
     }
   }
-  if (dateBlockIndex < 0 || !parsedDate) return null;
+  if (dateBlockIndex < 0 || !parsedDate) {
+    return { parsed: null, reason: "Нет валидного блока даты" };
+  }
 
   const tags = matches
     .filter((_, idx) => idx !== dateBlockIndex)
@@ -234,16 +238,25 @@ function parseFolderName(name) {
   const nameWithoutDate =
     name.slice(0, dateMatch.index) + name.slice(dateMatch.index + dateMatch[0].length);
   const title = nameWithoutDate.replace(/\[[^\]]+\]/g, " ").replace(/\s+/g, " ").trim();
-  if (!title) return null;
+  if (!title) {
+    return { parsed: null, reason: "Пустой заголовок после удаления блоков [...]" };
+  }
 
   return {
-    startISO: parsedDate.startISO,
-    endISO: parsedDate.endISO,
-    startDate: parsedDate.startDate,
-    endDate: parsedDate.endDate,
-    tags: [...new Set(tags)],
-    title,
+    parsed: {
+      startISO: parsedDate.startISO,
+      endISO: parsedDate.endISO,
+      startDate: parsedDate.startDate,
+      endDate: parsedDate.endDate,
+      tags: [...new Set(tags)],
+      title,
+    },
+    reason: null,
   };
+}
+
+function parseFolderName(name) {
+  return parseFolderNameAnalysis(name).parsed;
 }
 
 function parseDateBlock(rawBlock) {
@@ -436,6 +449,18 @@ function updatePageTitle(folderCount) {
   document.title = `${BASE_PAGE_TITLE} (${folderCount} ${folderWord(folderCount)})`;
 }
 
+function logSkippedFolders(totalFolders, skipped) {
+  if (!skipped.length) return;
+  const loaded = totalFolders - skipped.length;
+  console.groupCollapsed(
+    `[Timeline] Загружено ${loaded} из ${totalFolders}. Пропущено: ${skipped.length}`
+  );
+  for (const item of skipped) {
+    console.warn(`${item.name} -> ${item.reason}`);
+  }
+  console.groupEnd();
+}
+
 async function chooseFolder() {
   if (window.showDirectoryPicker) {
     try {
@@ -460,9 +485,14 @@ async function loadFromHandle(rootHandle) {
   }
 
   const events = [];
+  const skipped = [];
   for (const folder of entries) {
-    const parsed = parseFolderName(folder.name);
-    if (!parsed) continue;
+    const analysis = parseFolderNameAnalysis(folder.name);
+    const parsed = analysis.parsed;
+    if (!parsed) {
+      skipped.push({ name: folder.name, reason: analysis.reason || "Неизвестная ошибка парсинга" });
+      continue;
+    }
 
     const startDay = daysFromStart(parsed.startDate);
     const endDay = daysFromStart(parsed.endDate);
@@ -477,6 +507,7 @@ async function loadFromHandle(rootHandle) {
     });
   }
 
+  logSkippedFolders(entries.length, skipped);
   applyLoadedEvents(events);
 }
 
@@ -498,9 +529,14 @@ function loadFromFileList(files) {
   state.fallbackByFolder = byFolder;
 
   const events = [];
+  const skipped = [];
   for (const [folderName] of byFolder.entries()) {
-    const parsed = parseFolderName(folderName);
-    if (!parsed) continue;
+    const analysis = parseFolderNameAnalysis(folderName);
+    const parsed = analysis.parsed;
+    if (!parsed) {
+      skipped.push({ name: folderName, reason: analysis.reason || "Неизвестная ошибка парсинга" });
+      continue;
+    }
 
     const startDay = daysFromStart(parsed.startDate);
     const endDay = daysFromStart(parsed.endDate);
@@ -515,6 +551,7 @@ function loadFromFileList(files) {
     });
   }
 
+  logSkippedFolders(byFolder.size, skipped);
   applyLoadedEvents(events);
 }
 
