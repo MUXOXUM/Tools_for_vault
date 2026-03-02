@@ -514,6 +514,7 @@ get_earliest_date() {
 # --- Проверка, нужно ли пропускать файл для переименования по метаданным ---
 should_skip_for_metadata() {
     filename="$1"
+    add_ns_prefix="${2:-1}"
     basename_str=$(basename "$filename")
 
     # Пропускаем сам скрипт
@@ -544,16 +545,20 @@ should_skip_for_metadata() {
         return 0
     fi
 
-    # Пропускаем файлы, которые УЖЕ имеют правильный формат даты YYYY-MM-DD_HH.MM.SS (без префикса ns_)
-    # (точки как основной формат; двоеточия тоже допускаются для совместимости)
-    if echo "$basename_str" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}[:.][0-9]{2}[:.][0-9]{2}\.[^.]+$'; then
-        return 0
-    fi
+    # Для режима с добавлением ns_ НЕ пропускаем файлы уже в формате даты без ns_,
+    # чтобы можно было дописать префикс.
+    if [ "$add_ns_prefix" -ne 1 ]; then
+        # Пропускаем файлы, которые УЖЕ имеют правильный формат даты YYYY-MM-DD_HH.MM.SS (без префикса ns_)
+        # (точки как основной формат; двоеточия тоже допускаются для совместимости)
+        if echo "$basename_str" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}[:.][0-9]{2}[:.][0-9]{2}\.[^.]+$'; then
+            return 0
+        fi
 
-    # Пропускаем файлы, которые УЖЕ имеют правильный формат даты с миллисекундами YYYY-MM-DD_HH.MM.SS_XXX.ext
-    # (с миллисекундами от 1 до 3 цифр, без префикса ns_)
-    if echo "$basename_str" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}[:.][0-9]{2}[:.][0-9]{2}_[0-9]{1,3}\.[^.]+$'; then
-        return 0
+        # Пропускаем файлы, которые УЖЕ имеют правильный формат даты с миллисекундами YYYY-MM-DD_HH.MM.SS_XXX.ext
+        # (с миллисекундами от 1 до 3 цифр, без префикса ns_)
+        if echo "$basename_str" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}[:.][0-9]{2}[:.][0-9]{2}_[0-9]{1,3}\.[^.]+$'; then
+            return 0
+        fi
     fi
 
     return 1
@@ -838,6 +843,7 @@ mode_name_patterns() {
 # --- Пункт 3: Переименование по метаданным файла (дата создания/изменения) ---
 mode_metadata_body() {
     stats_file="$1"
+    add_ns_prefix="$2"
 
     find . -type f -print0 | while IFS= read -r -d '' file; do
         read p r s e < "$stats_file"
@@ -852,7 +858,7 @@ mode_metadata_body() {
         p=$((p + 1))
 
         # Проверяем, нужно ли пропустить файл
-        if should_skip_for_metadata "$file"; then
+        if should_skip_for_metadata "$file" "$add_ns_prefix"; then
             log_msg "INFO" "Режим 3: пропуск [$p] '$filename' (уже имеет правильный формат)"
             s=$((s + 1))
             echo "$p $r $s $e" > "$stats_file"
@@ -882,12 +888,17 @@ mode_metadata_body() {
                 nanoseconds=""
             fi
 
-            # Формируем новое имя с префиксом ns_ (в формате времени с точками)
+            # Формируем новое имя (в формате времени с точками)
             earliest_date_for_name=$(echo "$earliest_date" | tr ':' '.')
-            if [ -n "$nanoseconds" ] && [ "$nanoseconds" -gt 0 ] 2>/dev/null; then
-                new_name="ns_${earliest_date_for_name}_${nanoseconds}.${ext}"
+            if [ "$add_ns_prefix" -eq 1 ]; then
+                name_prefix="ns_"
             else
-                new_name="ns_${earliest_date_for_name}.${ext}"
+                name_prefix=""
+            fi
+            if [ -n "$nanoseconds" ] && [ "$nanoseconds" -gt 0 ] 2>/dev/null; then
+                new_name="${name_prefix}${earliest_date_for_name}_${nanoseconds}.${ext}"
+            else
+                new_name="${name_prefix}${earliest_date_for_name}.${ext}"
             fi
 
             new_path="$dir/$new_name"
@@ -895,49 +906,22 @@ mode_metadata_body() {
             log_msg "INFO" "Режим 3: обработка [$p] '$filename'"
             log_msg "INFO" "Режим 3: дата создания='${create_date:-недоступна}', дата изменения='$modify_date', выбрана='$earliest_date', мс='${nanoseconds:-нет}'"
 
-            # Проверяем, не совпадает ли новое имя с именем файла, который уже имеет правильный формат
-            # Извлекаем дату из имени файла, если она есть в формате YYYY-MM-DD_HH.MM.SS или YYYY-MM-DD_HH:MM:SS
-            name_date=$(echo "$filename" | grep -oE '^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}[:.][0-9]{2}[:.][0-9]{2}')
-            name_date_normalized=$(echo "$name_date" | tr '.' ':')
-
-            if [ -n "$name_date" ] && [ "$name_date_normalized" = "$earliest_date" ]; then
-                log_msg "INFO" "Режим 3: файл уже содержит правильную дату, добавляется префикс ns_"
-                # Переименовываем с добавлением префикса ns_ используя улучшенную safe_rename
-                safe_rename "$file" "$new_path" "$filename"
-                rc=$?
-                case "$rc" in
-                    0)
-                        log_msg "INFO" "Режим 3: добавлен префикс ns_ '$filename' -> '$(basename "$new_path")'"
-                        r=$((r + 1))
-                        ;;
-                    1)
-                        log_msg "ERROR" "Режим 3: ошибка переименования '$filename'"
-                        e=$((e + 1))
-                        ;;
-                    2)
-                        log_msg "INFO" "Режим 3: пропуск '$filename' (имя не изменилось)"
-                        s=$((s + 1))
-                        ;;
-                esac
-            else
-                # Используем улучшенную safe_rename для обычного переименования
-                safe_rename "$file" "$new_path" "$filename"
-                rc=$?
-                case "$rc" in
-                    0)
-                        log_msg "INFO" "Режим 3: переименован '$filename' -> '$(basename "$new_path")'"
-                        r=$((r + 1))
-                        ;;
-                    1)
-                        log_msg "ERROR" "Режим 3: ошибка переименования '$filename'"
-                        e=$((e + 1))
-                        ;;
-                    2)
-                        log_msg "INFO" "Режим 3: пропуск '$filename' (имя не изменилось)"
-                        s=$((s + 1))
-                        ;;
-                esac
-            fi
+            safe_rename "$file" "$new_path" "$filename"
+            rc=$?
+            case "$rc" in
+                0)
+                    log_msg "INFO" "Режим 3: переименован '$filename' -> '$(basename "$new_path")'"
+                    r=$((r + 1))
+                    ;;
+                1)
+                    log_msg "ERROR" "Режим 3: ошибка переименования '$filename'"
+                    e=$((e + 1))
+                    ;;
+                2)
+                    log_msg "INFO" "Режим 3: пропуск '$filename' (имя не изменилось)"
+                    s=$((s + 1))
+                    ;;
+            esac
         else
             log_msg "WARN" "Режим 3: не удалось получить дату для '$filename'"
             s=$((s + 1))
@@ -961,7 +945,7 @@ mode_metadata() {
 - Обрабатывает только фото и видео.
 - Берет дату создания и дату изменения файла.
 - Выбирает наиболее раннюю дату.
-- Формирует имя: ns_YYYY-MM-DD_HH.MM.SS.ext
+- Формирует имя: YYYY-MM-DD_HH.MM.SS.ext (с опциональным префиксом ns_)
 - При наличии наносекунд добавляет миллисекунды: ..._123.ext
 - При конфликте имен использует безопасное авто-добавление суффикса."; then
         return
@@ -970,6 +954,23 @@ mode_metadata() {
     clear_screen
     printf "${PURPLE}=== РЕЖИМ 3: Переименование по метаданным файла ===${NC}\n\n"
     log_msg "INFO" "Запуск режима 3 (метаданные файла)"
+    printf "${YELLOW}Добавлять префикс ns_ в начало имени? [y/N]: ${NC}"
+    read -r add_prefix_answer
+
+    case "$add_prefix_answer" in
+        Y|y|yes|YES)
+            add_ns_prefix=1
+            ;;
+        *)
+            add_ns_prefix=0
+            ;;
+    esac
+
+    if [ "$add_ns_prefix" -eq 1 ]; then
+        log_msg "INFO" "Режим 3: выбран префикс ns_"
+    else
+        log_msg "INFO" "Режим 3: выбран режим без префикса ns_"
+    fi
 
     processed=0
     renamed=0
@@ -979,7 +980,7 @@ mode_metadata() {
     stats_file=$(mktemp)
     echo "0 0 0 0" > "$stats_file"
 
-    run_mode_with_spinner "Режим 3: обработка файлов..." mode_metadata_body "$stats_file"
+    run_mode_with_spinner "Режим 3: обработка файлов..." mode_metadata_body "$stats_file" "$add_ns_prefix"
 
     read processed renamed skipped errors < "$stats_file"
     rm -f "$stats_file"
@@ -995,9 +996,92 @@ mode_metadata() {
     read -r dummy
 }
 
+# --- Пункт 4: Удаление префикса ns_ у файлов (рекурсивно) ---
+mode_remove_ns_prefix_body() {
+    stats_file="$1"
+
+    find . -type f -print0 | while IFS= read -r -d '' file; do
+        read p r s e < "$stats_file"
+        p=$((p + 1))
+        filename=$(basename "$file")
+
+        if echo "$filename" | grep -q '^ns_'; then
+            dir=$(dirname "$file")
+            new_name="${filename#ns_}"
+            new_path="$dir/$new_name"
+
+            safe_rename "$file" "$new_path" "$filename"
+            rc=$?
+            case "$rc" in
+                0)
+                    log_msg "INFO" "Режим 4: удален префикс ns_ '$filename' -> '$(basename "$new_path")'"
+                    r=$((r + 1))
+                    ;;
+                1)
+                    log_msg "ERROR" "Режим 4: ошибка переименования '$filename'"
+                    e=$((e + 1))
+                    ;;
+                2)
+                    log_msg "INFO" "Режим 4: пропуск '$filename' (имя не изменилось)"
+                    s=$((s + 1))
+                    ;;
+            esac
+        else
+            s=$((s + 1))
+        fi
+
+        echo "$p $r $s $e" > "$stats_file"
+    done
+}
+
+mode_remove_ns_prefix() {
+    if ! ensure_logging; then
+        printf "${RED}Ошибка: не удалось инициализировать логирование.${NC}\n"
+        printf "\n${PURPLE}Нажмите Enter для возврата в меню...${NC}"
+        read -r dummy
+        return
+    fi
+
+    if ! confirm_mode \
+        "РЕЖИМ 4: Удаление префикса ns_" \
+        "Как работает режим:
+- Рекурсивно обходит все файлы в текущей папке и подпапках.
+- Если имя файла начинается с ns_, удаляет этот префикс.
+- При конфликте имен использует безопасное авто-добавление суффикса."; then
+        return
+    fi
+
+    clear_screen
+    printf "${PURPLE}=== РЕЖИМ 4: Удаление префикса ns_ ===${NC}\n\n"
+    log_msg "INFO" "Запуск режима 4 (удаление ns_)"
+
+    processed=0
+    renamed=0
+    skipped=0
+    errors=0
+
+    stats_file=$(mktemp)
+    echo "0 0 0 0" > "$stats_file"
+
+    run_mode_with_spinner "Режим 4: обработка файлов..." mode_remove_ns_prefix_body "$stats_file"
+
+    read processed renamed skipped errors < "$stats_file"
+    rm -f "$stats_file"
+
+    printf "\n${PURPLE}=== ИТОГ РЕЖИМА 4 ===${NC}\n"
+    printf "${BLUE}Обработано: %d${NC}\n" "$processed"
+    printf "${GREEN}Переименовано: %d${NC}\n" "$renamed"
+    printf "${YELLOW}Пропущено: %d${NC}\n" "$skipped"
+    printf "${RED}Ошибок: %d${NC}\n" "$errors"
+    log_msg "INFO" "Итог режима 4: processed=$processed renamed=$renamed skipped=$skipped errors=$errors"
+
+    printf "\n${PURPLE}Нажмите Enter для возврата в меню...${NC}"
+    read -r dummy
+}
+
 # --- Главное меню ---
 show_menu() {
-    log_display="${LOG_FILE:-не создан (будет создан при запуске пункта 1-3)}"
+    log_display="${LOG_FILE:-не создан (будет создан при запуске пункта 1-4)}"
     clear_screen
     printf "${PURPLE}========================================${NC}\n"
     printf "${PURPLE}        MEDIA RENAMER UTILITY${NC}\n"
@@ -1005,6 +1089,7 @@ show_menu() {
     printf "${BLUE}1 - Переименование по EXIF${NC}\n"
     printf "${BLUE}2 - Переименование по шаблонам имен${NC}\n"
     printf "${BLUE}3 - Переименование по метаданным файла${NC}\n"
+    printf "${BLUE}4 - Удалить префикс ns_ у файлов${NC}\n"
     printf "${RED}0 - Выход${NC}\n"
     printf "${YELLOW}Лог: %s${NC}\n" "$log_display"
     printf "${PURPLE}========================================${NC}\n"
@@ -1027,6 +1112,9 @@ main() {
             3)
                 mode_metadata
                 ;;
+            4)
+                mode_remove_ns_prefix
+                ;;
             0)
                 clear_screen
                 printf "${GREEN}До свидания!${NC}\n"
@@ -1034,7 +1122,7 @@ main() {
                 exit 0
                 ;;
             *)
-                printf "${RED}Неверный выбор. Пожалуйста, выберите 0-3.${NC}\n"
+                printf "${RED}Неверный выбор. Пожалуйста, выберите 0-4.${NC}\n"
                 log_msg "WARN" "Неверный выбор меню: '$choice'"
                 sleep 2
                 ;;
