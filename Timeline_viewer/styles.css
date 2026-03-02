@@ -270,6 +270,33 @@ body::before {
   top: 62px;
 }
 
+.period-bands {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.timeline-period {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 10px;
+  border: 1px solid rgba(150, 170, 193, 0.18);
+  background: linear-gradient(180deg, rgba(121, 141, 164, 0.12), rgba(96, 114, 136, 0.08));
+  pointer-events: none;
+}
+
+.period-label {
+  position: absolute;
+  left: 8px;
+  bottom: 6px;
+  font-size: 10px;
+  color: rgba(188, 206, 226, 0.55);
+  pointer-events: none;
+  user-select: none;
+}
+
 .tick-label {
   position: absolute;
   color: #d4deec;
@@ -294,8 +321,36 @@ body::before {
   background: rgba(142, 162, 186, 0.2);
 }
 
+.birth-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: linear-gradient(180deg, rgba(204, 112, 112, 0.78), rgba(156, 62, 62, 0.78));
+  box-shadow: 0 0 8px rgba(156, 62, 62, 0.24);
+  z-index: 2;
+  pointer-events: none;
+}
+
+.birth-label {
+  position: absolute;
+  bottom: 8px;
+  transform: translateX(6px);
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(186, 110, 110, 0.45);
+  background: rgba(66, 26, 26, 0.72);
+  color: #e9c7c7;
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+  z-index: 2;
+  pointer-events: none;
+}
+
 .event {
   --event-top: rgba(128, 161, 196, 0.62);
+  z-index: 3;
   --event-bottom: rgba(102, 132, 166, 0.52);
   --event-border: rgba(124, 154, 189, 0.72);
   position: absolute;

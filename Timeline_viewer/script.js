@@ -5,6 +5,14 @@ const MONTH_LABEL_MIN_PX_PER_DAY = 0.42;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const ISO_DURATION_RE =
   /^P(?:(\d+)Y)?(?:(\d+)M)?(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:[.,]\d+)?)S)?)?$/i;
+const TIMELINE_PERIODS = [
+  { start: "2012-09-01", end: "2016-06-01", label: "Начальная школа" },
+  { start: "2016-09-01", end: "2021-06-01", label: "Средняя школа" },
+  { start: "2021-09-01", end: "2023-06-01", label: "Старшие классы" },
+  { start: "2023-09-01", end: "2027-06-15", label: "Университет" },
+];
+const BIRTH_MARKER_DATE = "2005-06-04";
+const BIRTH_MARKER_LABEL = "Рождение";
 const IMAGE_EXT = new Set(["jpg", "jpeg", "png", "webp"]);
 const VIDEO_EXT = new Set(["mp4", "webm"]);
 
@@ -613,11 +621,15 @@ function renderTimeline() {
   eventsLayer.className = "events-layer";
   timeline.appendChild(eventsLayer);
 
+  const periodsLayer = document.createElement("div");
+  periodsLayer.className = "period-bands";
+  timeline.appendChild(periodsLayer);
+
   const laneCount = assignLanes(state.filteredEvents, pxPerDay);
   const laneHeight = 22;
   const eventsHeight = Math.max(180, laneCount * laneHeight + 30);
-  eventsLayer.style.height = `${eventsHeight}px`;
-  timeline.style.height = `${eventsHeight + 72}px`;
+  eventsLayer.style.height = eventsHeight + "px";
+  timeline.style.height = eventsHeight + 72 + "px";
 
   for (let y = START_YEAR; y <= toDate.getUTCFullYear(); y += 1) {
     const yearDate = new Date(Date.UTC(y, 0, 1));
@@ -650,6 +662,9 @@ function renderTimeline() {
     }
   }
 
+  renderBirthMarker(pxPerDay, width);
+  renderTimelinePeriods(periodsLayer, pxPerDay, width);
+
   for (const event of state.filteredEvents) {
     const el = document.createElement("button");
     const isPoint = event.startDay === event.endDay;
@@ -674,6 +689,57 @@ function renderTimeline() {
 
     el.addEventListener("click", () => onSelectEvent(event.id));
     eventsLayer.appendChild(el);
+  }
+}
+
+function renderBirthMarker(pxPerDay, timelineWidth) {
+  const birthDate = parseISODate(BIRTH_MARKER_DATE);
+  if (!birthDate) return;
+
+  const x = daysFromStart(birthDate) * pxPerDay;
+  if (x < 0 || x > timelineWidth) return;
+
+  const line = document.createElement("div");
+  line.className = "birth-line";
+  line.style.left = `${x}px`;
+  line.setAttribute("aria-label", `${BIRTH_MARKER_DATE} ${BIRTH_MARKER_LABEL}`);
+  timeline.appendChild(line);
+
+  const label = document.createElement("div");
+  label.className = "birth-label";
+  label.style.left = `${x}px`;
+  label.textContent = BIRTH_MARKER_LABEL;
+  timeline.appendChild(label);
+}
+
+function renderTimelinePeriods(layer, pxPerDay, timelineWidth) {
+  for (const period of TIMELINE_PERIODS) {
+    const startDate = parseISODate(period.start);
+    const endDate = parseISODate(period.end);
+    if (!startDate || !endDate || endDate < startDate) continue;
+
+    const startDay = daysFromStart(startDate);
+    const endDay = daysFromStart(endDate);
+    const left = startDay * pxPerDay;
+    const bandWidth = Math.max(1, (endDay - startDay + 1) * pxPerDay);
+    if (left >= timelineWidth || left + bandWidth <= 0) continue;
+
+    const clampedLeft = Math.max(0, left);
+    const clampedWidth = Math.min(bandWidth - Math.max(0, -left), timelineWidth - clampedLeft);
+    if (clampedWidth <= 0) continue;
+
+    const band = document.createElement("div");
+    band.className = "timeline-period";
+    band.style.left = clampedLeft + "px";
+    band.style.width = clampedWidth + "px";
+    band.setAttribute("aria-label", period.start + " - " + period.end + ": " + period.label);
+
+    const text = document.createElement("span");
+    text.className = "period-label";
+    text.textContent = period.label;
+    band.appendChild(text);
+
+    layer.appendChild(band);
   }
 }
 
