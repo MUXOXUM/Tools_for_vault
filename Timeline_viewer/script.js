@@ -2,8 +2,9 @@ const START_YEAR = 2005;
 const START_DATE = new Date(`${START_YEAR}-01-01T00:00:00Z`);
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MONTH_LABEL_MIN_PX_PER_DAY = 0.42;
-const DATE_BLOCK_RE = /^\d{4}-\d{2}-\d{2}(?:[\/\u2044]\d{4}-\d{2}-\d{2})?$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const ISO_DURATION_RE =
+  /^P(?:(\d+)Y)?(?:(\d+)M)?(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:[.,]\d+)?)S)?)?$/i;
 const IMAGE_EXT = new Set(["jpg", "jpeg", "png", "webp"]);
 const VIDEO_EXT = new Set(["mp4", "webm"]);
 
@@ -201,46 +202,132 @@ function parseFolderName(name) {
   if (!matches.length) return null;
 
   let dateBlockIndex = -1;
-  let dateBlock = null;
+  let parsedDate = null;
   for (let i = 0; i < matches.length; i += 1) {
     const raw = matches[i][1].trim();
-    if (DATE_BLOCK_RE.test(raw)) {
+    const parsed = parseDateBlock(raw);
+    if (parsed) {
       dateBlockIndex = i;
-      dateBlock = raw;
+      parsedDate = parsed;
       break;
     }
   }
-  if (dateBlockIndex < 0 || !dateBlock) return null;
-
-  const split = dateBlock.replace("\u2044", "/").split("/");
-  const start = split[0];
-  const end = split[1] || split[0];
-  if (!DATE_RE.test(start) || !DATE_RE.test(end)) return null;
-
-  const startDate = new Date(`${start}T00:00:00Z`);
-  const endDate = new Date(`${end}T00:00:00Z`);
-  if (Number.isNaN(startDate.valueOf()) || Number.isNaN(endDate.valueOf())) return null;
-
-  if (endDate < startDate) {
-    return null;
-  }
+  if (dateBlockIndex < 0 || !parsedDate) return null;
 
   const tags = matches
-    .slice(0, dateBlockIndex)
+    .filter((_, idx) => idx !== dateBlockIndex)
     .map((m) => m[1].trim().toLowerCase())
     .filter(Boolean);
 
-  const tail = name.slice(matches[dateBlockIndex].index + matches[dateBlockIndex][0].length).trim();
-  if (!tail) return null;
+  const dateMatch = matches[dateBlockIndex];
+  const nameWithoutDate =
+    name.slice(0, dateMatch.index) + name.slice(dateMatch.index + dateMatch[0].length);
+  const title = nameWithoutDate.replace(/\[[^\]]+\]/g, " ").replace(/\s+/g, " ").trim();
+  if (!title) return null;
 
   return {
-    startISO: start,
-    endISO: end,
+    startISO: parsedDate.startISO,
+    endISO: parsedDate.endISO,
+    startDate: parsedDate.startDate,
+    endDate: parsedDate.endDate,
+    tags: [...new Set(tags)],
+    title,
+  };
+}
+
+function parseDateBlock(rawBlock) {
+  const normalized = rawBlock.replace(/\u2044/g, "/").trim();
+  if (!normalized) return null;
+
+  const parts = normalized.split(/\s*\/\s*/).filter(Boolean);
+  if (parts.length > 2 || parts.length === 0) return null;
+
+  const startISO = parts[0];
+  if (!DATE_RE.test(startISO)) return null;
+  const startDate = parseISODate(startISO);
+  if (!startDate) return null;
+
+  if (parts.length === 1) {
+    return {
+      startISO,
+      endISO: startISO,
+      startDate,
+      endDate: new Date(startDate.getTime()),
+    };
+  }
+
+  const rhs = parts[1];
+  if (DATE_RE.test(rhs)) {
+    const endDate = parseISODate(rhs);
+    if (!endDate || endDate < startDate) return null;
+    return {
+      startISO,
+      endISO: rhs,
+      startDate,
+      endDate,
+    };
+  }
+
+  const endDate = endDateFromDuration(startDate, rhs);
+  if (!endDate) return null;
+  return {
+    startISO,
+    endISO: toISODate(endDate),
     startDate,
     endDate,
-    tags: [...new Set(tags)],
-    title: tail,
   };
+}
+
+function parseISODate(isoDate) {
+  if (!DATE_RE.test(isoDate)) return null;
+  const parsed = new Date(`${isoDate}T00:00:00Z`);
+  if (Number.isNaN(parsed.valueOf())) return null;
+  return parsed;
+}
+
+function toISODate(date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function endDateFromDuration(startDate, durationRaw) {
+  const duration = durationRaw.trim().toUpperCase();
+  const match = duration.match(ISO_DURATION_RE);
+  if (!match) return null;
+
+  const hasComponent = match.slice(1).some((part) => part && part !== "0" && part !== "0.0");
+  if (!hasComponent) return null;
+
+  const years = Number(match[1] || 0);
+  const months = Number(match[2] || 0);
+  const weeks = Number(match[3] || 0);
+  const days = Number(match[4] || 0);
+  const hours = Number(match[5] || 0);
+  const minutes = Number(match[6] || 0);
+  const seconds = Number((match[7] || "0").replace(",", "."));
+  if (
+    [years, months, weeks, days, hours, minutes, seconds].some((n) => !Number.isFinite(n) || n < 0)
+  ) {
+    return null;
+  }
+
+  const endExclusive = new Date(startDate.getTime());
+  if (years) endExclusive.setUTCFullYear(endExclusive.getUTCFullYear() + years);
+  if (months) endExclusive.setUTCMonth(endExclusive.getUTCMonth() + months);
+  if (weeks) endExclusive.setUTCDate(endExclusive.getUTCDate() + weeks * 7);
+  if (days) endExclusive.setUTCDate(endExclusive.getUTCDate() + days);
+  if (hours) endExclusive.setUTCHours(endExclusive.getUTCHours() + hours);
+  if (minutes) endExclusive.setUTCMinutes(endExclusive.getUTCMinutes() + minutes);
+  if (seconds) endExclusive.setTime(endExclusive.getTime() + Math.round(seconds * 1000));
+
+  if (!(endExclusive > startDate)) return null;
+  const inclusiveMoment = new Date(endExclusive.getTime() - 1);
+  return new Date(
+    Date.UTC(
+      inclusiveMoment.getUTCFullYear(),
+      inclusiveMoment.getUTCMonth(),
+      inclusiveMoment.getUTCDate()
+    )
+  );
 }
 
 function daysFromStart(date) {
