@@ -3,6 +3,8 @@ const START_DATE = new Date(`${START_YEAR}-01-01T00:00:00Z`);
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MONTH_LABEL_MIN_PX_PER_DAY = 0.42;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const YEAR_RE = /^\d{4}$/;
+const YEAR_MONTH_RE = /^(\d{4})-(\d{2})$/;
 const ISO_DURATION_RE =
   /^P(?:(\d+)Y)?(?:(\d+)M)?(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:[.,]\d+)?)S)?)?$/i;
 const TIMELINE_PERIODS = [
@@ -54,6 +56,7 @@ const viewerClose = document.getElementById("viewer-close");
 const viewerPrev = document.getElementById("viewer-prev");
 const viewerNext = document.getElementById("viewer-next");
 const viewerStage = document.getElementById("viewer-stage");
+const BASE_PAGE_TITLE = document.title;
 let mediaLazyObserver = null;
 const panelResizeState = {
   active: false,
@@ -250,29 +253,29 @@ function parseDateBlock(rawBlock) {
   const parts = normalized.split(/\s*\/\s*/).filter(Boolean);
   if (parts.length > 2 || parts.length === 0) return null;
 
-  const startISO = parts[0];
-  if (!DATE_RE.test(startISO)) return null;
-  const startDate = parseISODate(startISO);
-  if (!startDate) return null;
+  const startToken = parseDateToken(parts[0]);
+  if (!startToken) return null;
+  const startISO = startToken.startISO;
+  const startDate = startToken.startDate;
 
   if (parts.length === 1) {
     return {
-      startISO,
-      endISO: startISO,
-      startDate,
-      endDate: new Date(startDate.getTime()),
+      startISO: startToken.startISO,
+      endISO: startToken.endISO,
+      startDate: startToken.startDate,
+      endDate: startToken.endDate,
     };
   }
 
   const rhs = parts[1];
-  if (DATE_RE.test(rhs)) {
-    const endDate = parseISODate(rhs);
-    if (!endDate || endDate < startDate) return null;
+  const endToken = parseDateToken(rhs);
+  if (endToken) {
+    if (endToken.endDate < startDate) return null;
     return {
       startISO,
-      endISO: rhs,
+      endISO: endToken.endISO,
       startDate,
-      endDate,
+      endDate: endToken.endDate,
     };
   }
 
@@ -284,6 +287,51 @@ function parseDateBlock(rawBlock) {
     startDate,
     endDate,
   };
+}
+
+function parseDateToken(rawToken) {
+  const token = rawToken.trim();
+  if (!token) return null;
+
+  if (DATE_RE.test(token)) {
+    const date = parseISODate(token);
+    if (!date) return null;
+    return {
+      startISO: token,
+      endISO: token,
+      startDate: date,
+      endDate: new Date(date.getTime()),
+    };
+  }
+
+  if (YEAR_RE.test(token)) {
+    const startISO = `${token}-01-01`;
+    const startDate = parseISODate(startISO);
+    if (!startDate) return null;
+    return {
+      startISO,
+      endISO: startISO,
+      startDate,
+      endDate: new Date(startDate.getTime()),
+    };
+  }
+
+  const monthMatch = token.match(YEAR_MONTH_RE);
+  if (monthMatch) {
+    const month = Number(monthMatch[2]);
+    if (month < 1 || month > 12) return null;
+    const startISO = `${monthMatch[1]}-${monthMatch[2]}-01`;
+    const startDate = parseISODate(startISO);
+    if (!startDate) return null;
+    return {
+      startISO,
+      endISO: startISO,
+      startDate,
+      endDate: new Date(startDate.getTime()),
+    };
+  }
+
+  return null;
 }
 
 function parseISODate(isoDate) {
@@ -369,6 +417,23 @@ function buildTagColors(tags) {
     map.set(tag, colorForTag(i));
   });
   return map;
+}
+
+function folderWord(count) {
+  const abs = Math.abs(count) % 100;
+  const last = abs % 10;
+  if (abs > 10 && abs < 20) return "папок";
+  if (last === 1) return "папка";
+  if (last >= 2 && last <= 4) return "папки";
+  return "папок";
+}
+
+function updatePageTitle(folderCount) {
+  if (!folderCount) {
+    document.title = BASE_PAGE_TITLE;
+    return;
+  }
+  document.title = `${BASE_PAGE_TITLE} (${folderCount} ${folderWord(folderCount)})`;
 }
 
 async function chooseFolder() {
@@ -459,6 +524,7 @@ function applyLoadedEvents(events) {
   state.allTags = collectTags(events);
   state.tagColors = buildTagColors(state.allTags);
   state.activeTags = new Set(state.allTags);
+  updatePageTitle(events.length);
 
   renderFilters();
   applyFilters();
@@ -480,6 +546,7 @@ function resetState() {
   state.viewerItems = [];
   setMediaTitle("");
   closeViewer();
+  updatePageTitle(0);
 }
 
 function setPickerHidden(hidden) {
